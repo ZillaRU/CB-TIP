@@ -1,0 +1,3 @@
+"""
+Featurizers for macro molecules
+"""
