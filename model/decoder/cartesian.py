@@ -44,7 +44,7 @@ class DEDICOMDecoder(torch.nn.Module):
 
 
 class DistMultDecoder(torch.nn.Module):
-    """DEDICOM Tensor Factorization Decoder model layer for link prediction."""
+    """DistMultDecoderr model layer for link prediction."""
     def __init__(self, input_dim, num_relation_types, drop_prob=0.,
         activation=torch.sigmoid, **kwargs):
 
@@ -74,7 +74,7 @@ class DistMultDecoder(torch.nn.Module):
 
 
 class BilinearDecoder(torch.nn.Module):
-    """DEDICOM Tensor Factorization Decoder model layer for link prediction."""
+    """BilinearDecoder model layer for link prediction."""
     def __init__(self, input_dim, num_relation_types, drop_prob=0.,
         activation=torch.sigmoid, **kwargs):
 
@@ -102,7 +102,7 @@ class BilinearDecoder(torch.nn.Module):
 
 
 class InnerProductDecoder(torch.nn.Module):
-    """DEDICOM Tensor Factorization Decoder model layer for link prediction."""
+    """InnerProductDecoder model layer for link prediction."""
     def __init__(self, input_dim, num_relation_types, drop_prob=0.,
         activation=torch.sigmoid, **kwargs):
 

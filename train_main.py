@@ -4,11 +4,11 @@ import time
 
 import pandas as pd
 import torch
-from sklearn import metrics
-
 from model import build_optimizer
 from model.biomip import initialize_BioMIP
 from model.customized_loss import select_loss_function
+from sklearn import metrics
+
 from utils.arg_parser import parser
 from utils.data_utils import eval_threshold
 from utils.generate_intra_graph_db import generate_small_mol_graph_datasets, generate_macro_mol_graph_datasets
@@ -18,16 +18,22 @@ from utils.intra_graph_dataset import IntraGraphDataset
 
 
 # training fuction on each epoch
-def train_intra(model, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
-    model.train()
+def train_intra(encoder, decoder, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
+    encoder.train()
+    decoder.train()
     opt.zero_grad()
-    emb_intra, emb_inter, \
-    pos_score, neg_score, \
-    pos_intra, neg_intra = model(mol_graphs,
-                                 train_pos_graph, train_neg_graph,
-                                 pred_rels=pred_rels)
+    emb_intra, emb_inter = encoder(mol_graphs,
+                                   train_pos_graph,
+                                   pred_rels=pred_rels)
+    pos_score = decoder(train_pos_graph, emb_intra, emb_inter,
+                        pred_rels=pred_rels)
+    neg_score = decoder(train_neg_graph, emb_intra, emb_inter,
+                        pred_rels=pred_rels)
+    print(pos_score)
+    print(neg_score)
     labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
     scores = torch.cat([pos_score, neg_score]).numpy()
+
     loss = loss_fn['BCE'](labels, scores)
     if 'ERROR' in loss_fn:
         loss += loss_fn['DIFF'](emb_intra, emb_inter)
@@ -39,13 +45,23 @@ def train_intra(model, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_ne
 
 
 # training fuction on each epoch
-def train_both(model, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, task='dt'):
+def train_both(model, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
     model.train()
     opt.zero_grad()
-    emb_intra, emb_inter, pos_score, neg_score, pos_intra, neg_intra = model(mol_graphs, train_pos_graph,
-                                                                             train_neg_graph, train=True)
-    labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
-    scores = torch.cat([pos_score, neg_score]).numpy()
+    emb_intra, emb_inter = encoder(mol_graphs,
+                                   train_pos_graph,
+                                   pred_rels=pred_rels)
+    pos_score_intra, pos_score_inter = decoder(train_pos_graph, emb_intra, emb_inter,
+                        pred_rels=pred_rels)
+    neg_score_intra, neg_score_inter = decoder(train_neg_graph, emb_intra, emb_inter,
+                        pred_rels=pred_rels)
+    print(pos_score_intra)
+    print(neg_score_intra)
+    print(pos_score_inter)
+    print(neg_score_inter)
+    labels = torch.cat([torch.ones(pos_score_inter.shape[0]), torch.zeros(neg_score_inter.shape[0])]).numpy()
+    intra_scores = torch.cat([pos_score_intra, neg_score_intra]).numpy()
+    inter_scores = torch.cat([pos_score_inter, neg_score_inter]).numpy()
     loss = loss_fn['BCE'](labels, scores)
     if 'ERROR' in loss_fn:
         loss += loss_fn['DIFF'](emb_intra)
@@ -119,7 +135,7 @@ if __name__ == '__main__':
     params.aa_edge_insize = macro_mol_graphs.get_efeat_dim()
 
     edge_type2decoder = {
-        'tt': 'bilinear',
+        'tt': 'dedicom',
         'dt': 'bilinear',
         '~dt': 'bilinear',
         'dd': 'dedicom'
@@ -172,6 +188,7 @@ if __name__ == '__main__':
 
     small_intra_g_list = [small_mol_graphs[id2drug[i]][1] for i in range(small_cnt)]
     target_intra_g_list = [macro_mol_graphs[id2target[i]][2] for i in range(target_cnt)]
+
     # init molecule graphs for all molecules in inter_graph
     mol_graphs = {
         'small': small_intra_g_list,  # d_id = idx
@@ -194,30 +211,30 @@ if __name__ == '__main__':
             params.pred_rels = dt_types
         elif params.task == 'dd':
             raise NotImplementedError
-            #todo
+            # todo
         elif params.task == 'all':
             params.pred_rels = None
 
     if not params.is_test:
         # init model, opt, loss
-        model = initialize_BioMIP(params, edge_type2decoder)
-        opt = build_optimizer(model, params)
+        encoder, decoder = initialize_BioMIP(params, edge_type2decoder)
+        opt = build_optimizer(encoder, decoder, params)
         loss_fn = select_loss_function(params.loss)  # a loss dict 'loss name': (weight, loss_fuction)
         best_auc = 0.
         best_epoch = -1
         for epoch in range(1, params.n_epoch + 1):
             if epoch <= params.epoch_intra:
-                emb_intra, emb_inter = train_intra(model, opt, loss_fn,
+                emb_intra, emb_inter = train_intra(encoder, decoder, opt, loss_fn,
                                                    mol_graphs,
                                                    train_pos_graph, train_neg_graph,
                                                    pred_rels=params.pred_rels)
             else:
-                emb_intra, emb_inter = train_both(model, opt, loss_fn,
+                emb_intra, emb_inter = train_both(encoder, decoder, opt, loss_fn,
                                                   mol_graphs,
                                                   train_pos_graph, train_neg_graph,
-                                                  params.task)
+                                                  pred_rels=params.pred_rels)
             print('predicting for valid data')
-            val_G, val_P = predicting(model,
+            val_G, val_P = predicting(encoder,
                                       emb_intra, emb_inter,
                                       triplets['valid']['pos'], triplets['valid']['neg'])
             val = metrics.roc_auc_score(val_G, val_P)
@@ -225,12 +242,12 @@ if __name__ == '__main__':
             if val > best_auc:
                 best_auc = val
                 best_epoch = epoch
-                torch.save(model.state_dict(), f'trained_models/{model_file_name})')
+                torch.save(encoder.state_dict(), f'trained_models/{model_file_name})')
                 print(f'AUROC improved at epoch {best_epoch}')
                 print(f'val AUROC {val}, AUPRC {metrics.average_precision_score(val_G, val_P)}, '
                       f'F1: {metrics.f1_score(val_G, eval_threshold(val_G, val_P)[1])}')
                 print('predicting for test data')
-                test_G, test_P = predicting(model,
+                test_G, test_P = predicting(encoder,
                                             emb_intra, emb_inter,
                                             triplets['valid']['pos'], triplets['valid']['neg'])
                 auroc, auprc, f1 = metrics.roc_auc_score(test_G, test_P), \
