@@ -5,7 +5,7 @@ import torch
 from scipy.sparse import csc_matrix
 
 
-def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, saved_relation2id=None):
+def dd_dt_tt_build_inter_graph_from_links(dataset, split, saved_relation2id=None):
     files = {
         'train': {
             'pos': f'data/{dataset}{split}/train_pos.txt',
@@ -16,162 +16,146 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
             'neg': f'data/{dataset}{split}/train_neg.txt'
         },
         'test': {
-            'pos':  f'data/{dataset}{split}/test_pos.txt',
-            'neg':  f'data/{dataset}{split}/test_neg.txt'
+            'pos': f'data/{dataset}{split}/test_pos.txt',
+            'neg': f'data/{dataset}{split}/test_neg.txt'
         }
     }
+
     dti_file = f'data/{dataset}/DTIs.csv'
     tti_file = f'data/{dataset}/TTIs.csv'
 
-    drug2id, target2id = {}, {}
+    drug2id, bio2id, target2id = {}, {}, {}
 
-    if dataset == 'full':
-        biodrug_set = set(pd.read_csv(f'data/{dataset}/biotech_seqs.csv', header=None).iloc[:, 0])
-        bio_cnt = 0
-        bio2id = {}
-        # dd_types
-        # ud,ub,vd,vb
-        type_dict = {
-            (True, True, True, True): ('macro', 'macro'),
-            (True, False, True, False): ('small', 'small'),
-            (True, False, True, True): ('small', 'macro'),
-            (True, True, True, False): ('macro', 'small'),
-            (True, True, False, False): ('macro', 'target'),
-            (True, False, False, False): ('small', 'target')
-        }
-    else:
-        type_dict = {
-            (True, True): 'dd',
-            (True, False): 'dt',
-            (False, False): 'tt'
-        }
-        # dd_types
+    biodrug_set = set(pd.read_csv(f'data/{dataset}/biotech_seqs.csv', header=None).iloc[:, 0]) \
+        if dataset == 'full' else set()
+
+    # dd_types
+    # ub,vd,vb
+    type_dict = {
+        (True, True): ('macro', 'macro'),
+        (False, False): ('small', 'small'),
+        (False, True): ('small', 'macro'),
+        (True, False): ('macro', 'small')
+    }
 
     relation2id = {} if not saved_relation2id else None
 
-    small_cnt, target_cnt = 0, 0
+    small_cnt, bio_cnt, target_cnt = 0, 0, 0
     rel = 0
     triplets = {}
     dd_dt_tt_triplets = {}
 
+    # all triplets are DDIs
     for file_type, file_paths in files.items():  # train/valid/test, pos/neg
         triplets[file_type] = {}
         dd_dt_tt_triplets[file_type] = {}
         for y, path in file_paths.items():  # pos/neg, path
-            if dataset == 'full':  # asymmetric
-                dd_dt_tt_data = {}
-                dd_dt_tt_data[('small', 'small')] = []
-                dd_dt_tt_data[('small', 'macro')] = []
-                dd_dt_tt_data[('macro', 'small')] = []
-                dd_dt_tt_data[('macro', 'macro')] = []
-                dd_dt_tt_data[('macro', 'target')] = []
-                dd_dt_tt_data[('small', 'target')] = []
-            else:
-                dd_dt_tt_data = {
-                    'dd': [],
-                    'dt': [],
-                    'tt': []
-                }
-            data = []
+            dd_dt_tt_data = {}
+            dd_dt_tt_data[('small', 'small')] = []
+            dd_dt_tt_data[('small', 'macro')] = []
+            dd_dt_tt_data[('macro', 'small')] = []
+            dd_dt_tt_data[('macro', 'macro')] = []
             with open(path) as f:
                 file_data = [line.split(',') for line in f.read().split('\n')[:-1]]
-            for [u, r, v] in file_data:
-                if r == 'dt':
-                    u_is_d, v_is_d = True, False
-                elif r == 'dd':
-                    u_is_d, v_is_d = True, True
-                elif r == 'tt':
-                    u_is_d, v_is_d = False, False
-                elif dataset == 'full':  # for drugbank
-                    u_is_d, v_is_d = u.startswith('DB'), v.startswith('DB')
-                    u_is_bio, v_is_bio = u in biodrug_set, v in biodrug_set
+            for u, r, v in file_data:
+                u_is_bio, v_is_bio = u in biodrug_set, v in biodrug_set
+                if u_is_bio:
+                    if u not in bio2id:
+                        uid = bio2id[u] = bio_cnt
+                        bio_cnt += 1
+                    else:
+                        uid = bio2id[u]
                 else:
-                    raise NotImplementedError
-                if dataset != 'full':
-                    if u_is_d:
-                        if u not in drug2id:
-                            uid = drug2id[u] = small_cnt
-                            small_cnt += 1
-                        else:
-                            uid = drug2id[u]
-                    elif u not in target2id:
-                        uid = target2id[u] = target_cnt
-                        target_cnt += 1
+                    if u not in drug2id:
+                        uid = drug2id[u] = small_cnt
+                        small_cnt += 1
                     else:
-                        uid = target2id[u]
-                    if v_is_d:
-                        if v not in drug2id:
-                            vid = drug2id[v] = small_cnt
-                            small_cnt += 1
-                        else:
-                            vid = drug2id[v]
-                    elif v not in target2id:
-                        vid = target2id[v] = target_cnt
-                        target_cnt += 1
+                        uid = drug2id[u]
+                if v_is_bio:
+                    if v not in bio2id:
+                        vid = bio2id[v] = bio_cnt
+                        bio_cnt += 1
                     else:
-                        vid = target2id[v]
+                        vid = bio2id[v]
                 else:
-                    if u_is_d:
-                        if u_is_bio:
-                            if u not in bio2id:
-                                uid = bio2id[u] = bio_cnt
-                                bio_cnt += 1
-                            else:
-                                uid = bio2id[u]
-                        else:
-                            if u not in drug2id:
-                                uid = drug2id[u] = small_cnt
-                                small_cnt += 1
-                            else:
-                                uid = drug2id[u]
-                    elif u not in target2id:
-                        uid = target2id[u] = target_cnt
-                        target_cnt += 1
+                    if v not in drug2id:
+                        vid = drug2id[v] = small_cnt
+                        small_cnt += 1
                     else:
-                        uid = target2id[u]
-                    if v_is_d:
-                        if v_is_bio:
-                            if v not in bio2id:
-                                vid = bio2id[v] = bio_cnt
-                                bio_cnt += 1
-                            else:
-                                vid = bio2id[v]
-                        else:
-                            if v not in drug2id:
-                                vid = drug2id[v] = small_cnt
-                                small_cnt += 1
-                            else:
-                                vid = drug2id[v]
-                    elif v not in target2id:
-                        vid = target2id[v] = target_cnt
-                        target_cnt += 1
-                    else:
-                        vid = target2id[v]
+                        vid = drug2id[v]
                 if not saved_relation2id and r not in relation2id:
                     relation2id[r] = rel
                     rel += 1
                 # Save the triplets corresponding to only the known relations
                 if r in relation2id:
                     temp = [uid, vid, relation2id[r]]
-                    if dataset != 'full':
-                        data.append(temp)
-                        dd_dt_tt_data[type_dict[(u_is_d, v_is_d)]].append(temp)
-                    else:
-                        dd_dt_tt_data[type_dict[(u_is_d, u_is_bio, v_is_d, v_is_bio)]].append(temp)
-            if dataset != 'full_drugbank':
-                triplets[file_type][y] = np.array(data, dtype=np.int16)
+                    dd_dt_tt_data[type_dict[(u_is_bio, v_is_bio)]].append(temp)
             dd_dt_tt_triplets[file_type][y] = dd_dt_tt_data
-        if dataset == 'full_drugbank':
-            for _set, label_tris in dd_dt_tt_triplets.items():
-                for _label, dd_dt_tt_data in label_tris.items():
-                    temp_list = dd_dt_tt_data[('small', 'macro')]
-                    dd_dt_tt_data[('small', 'macro')] = [
-                        [u, v + small_cnt, r] for u, v, r in temp_list
-                    ]
-                    temp_list = dd_dt_tt_data[('macro', 'small')]
-                    dd_dt_tt_data[('macro', 'small')] = [
-                        [u + small_cnt, v, r] for u, v, r in temp_list
-                    ]
+        if file_type == 'train':
+            dti_list = pd.read_csv(f'data/{dataset}/DTIs.csv', header=None).values.tolist()
+            small_t_is, bio_t_is = [], []
+            for d, t in dti_list:
+                d_is_bio = d in biodrug_set
+                if d_is_bio:
+                    if d not in bio2id:
+                        did = bio2id[d] = bio_cnt
+                        bio_cnt += 1
+                    else:
+                        did = bio2id[d]
+                else:
+                    if d not in drug2id:
+                        did = drug2id[d] = small_cnt
+                        small_cnt += 1
+                    else:
+                        did = drug2id[d]
+                if t not in target2id:
+                    tid = target2id[t] = target_cnt
+                    target_cnt += 1
+                else:
+                    tid = target2id[t]
+                if d_is_bio:
+                    bio_t_is.append([did, tid, rel])
+                else:
+                    small_t_is.append([did, tid, rel])
+            dd_dt_tt_triplets[file_type]['pos'][('small', 'target')] = small_t_is
+
+            relation2id['dt'] = rel
+            rel += 1
+
+            tti_list = pd.read_csv(f'data/{dataset}/TTIs.csv', header=None).values.tolist()
+            ttis = []
+            for t1, t2 in tti_list:
+                if t1 not in target2id:
+                    tid1 = target2id[t1] = target_cnt
+                    target_cnt += 1
+                else:
+                    tid1 = target2id[t1]
+                if t2 not in target2id:
+                    tid2 = target2id[t2] = target_cnt
+                    target_cnt += 1
+                else:
+                    tid2 = target2id[t2]
+                ttis.append([tid1, tid2, rel])
+            dd_dt_tt_triplets[file_type]['pos'][('target', 'target')] = ttis
+            relation2id['tt'] = rel
+            rel += 1
+
+        for _set, label_tris in dd_dt_tt_triplets.items():
+            for _label, dd_dt_tt_data in label_tris.items():
+                temp_list = dd_dt_tt_data[('small', 'macro')]
+                dd_dt_tt_data[('small', 'macro')] = [
+                    [u, v + small_cnt, r] for u, v, r in temp_list
+                ]
+                temp_list = dd_dt_tt_data[('macro', 'small')]
+                dd_dt_tt_data[('macro', 'small')] = [
+                    [u + small_cnt, v, r] for u, v, r in temp_list
+                ]
+                temp_list = dd_dt_tt_data[('macro', 'macro')]
+                dd_dt_tt_data[('macro', 'macro')] = [
+                    [u + small_cnt, v + small_cnt, r] for u, v, r in temp_list
+                ]
+                temp_dict = {}
+                if file_type == 'train':
                     temp_list = dd_dt_tt_data[('macro', 'target')]
                     dd_dt_tt_data[('macro', 'target')] = [
                         [u + small_cnt, v, r] for u, v, r in temp_list
@@ -180,24 +164,27 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
                     dd_dt_tt_data[('target', 'macro')] = [
                         [u, v + small_cnt, r] for u, v, r in temp_list
                     ]
-                    temp_list = dd_dt_tt_data[('macro', 'macro')]
-                    dd_dt_tt_data[('macro', 'macro')] = [
-                        [u + small_cnt, v + small_cnt, r] for u, v, r in temp_list
+                    temp_list = dd_dt_tt_data[('target', 'target')]
+                    dd_dt_tt_data[('target', 'target')] = [
+                        [u, v + small_cnt, r] for u, v, r in temp_list
                     ]
-                    temp_dict = {}
                     temp_dict['dd'] = dd_dt_tt_data[('small', 'small')] + dd_dt_tt_data[('small', 'macro')] \
                                       + dd_dt_tt_data[('macro', 'small')] + dd_dt_tt_data[('macro', 'macro')]
                     temp_dict['dt'] = dd_dt_tt_data[('small', 'target')] + dd_dt_tt_data[('macro', 'target')]
                     temp_dict['tt'] = dd_dt_tt_data[('target', 'target')]
-                    dd_dt_tt_triplets[_set][_label] = temp_dict
                     triplets[_set][_label] = np.array(temp_dict['dd'] + temp_dict['dt'] + temp_dict['tt'],
                                                       dtype=np.int16)
-            for k, v in bio2id:
-                drug2id[small_cnt + k] = v
+                else:
+                    temp_dict['dd'] = dd_dt_tt_data[('small', 'small')] + dd_dt_tt_data[('small', 'macro')] \
+                                      + dd_dt_tt_data[('macro', 'small')] + dd_dt_tt_data[('macro', 'macro')]
+                    triplets[_set][_label] = np.array(temp_dict['dd'], dtype=np.int16)
+                dd_dt_tt_triplets[_set][_label] = temp_dict
+        for k, v in bio2id:
+            drug2id[small_cnt + k] = v
     id2drug = {v: k for k, v in drug2id.items()}
     id2target = {v: k for k, v in target2id.items()}
     id2relation = {v: k for k, v in relation2id.items()}
-
+    drug_cnt = small_cnt + bio_cnt
     # Construct the list of adjacency matrix each corresponding to each relation.
     # Note that this is constructed only from the train data.
     _dict = {}
@@ -207,16 +194,14 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
             idx = np.argwhere(triplets['train'][_set][:, 2] == i)
             rel = id2relation[i]
             rel_tuple = (
-                "target" if (rel in tt_types or rel in dt_types) else "drug",
+                "target" if rel == 'tt' else "drug",
                 rel,
-                "drug" if rel not in tt_types else "target"
-            ) if rel != 'dt' else ('drug', 'dt', 'target')
-            shape = (
-                target_cnt if (rel in tt_types or rel in dt_types) else small_cnt,
-                small_cnt if rel not in tt_types else target_cnt
+                "drug" if rel != 'tt' else "target"
             )
-            if rel == 'dt':
-                shape = (small_cnt, target_cnt)
+            shape = (
+                drug_cnt if rel != 'tt' else target_cnt,
+                target_cnt if rel != 'dd' else drug_cnt
+            )
             print(rel, shape)
             _dict[_set][rel_tuple] = csc_matrix(
                 (
@@ -226,7 +211,6 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
                         triplets['train'][_set][:, 1][idx].squeeze(1)
                     )
                 ), shape=shape)
-        drug_cnt = small_cnt + (bio_cnt if dataset == 'full_drugbank' else 0)
         print(f'drug_cnt: {drug_cnt}, (including {small_cnt} small ones); target_cnt: {target_cnt}')
     return _dict['pos'], _dict['neg'], triplets, dd_dt_tt_triplets, \
            drug2id, target2id, relation2id, \

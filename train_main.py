@@ -4,11 +4,11 @@ import time
 
 import pandas as pd
 import torch
-from model import build_optimizer
-from model.biomip import initialize_BioMIP
-from model.customized_loss import select_loss_function
 from sklearn import metrics
 
+from model import build_optimizer
+from model.model_config import initialize_BioMIP
+from model.customized_loss import select_loss_function
 from utils.arg_parser import parser
 from utils.data_utils import eval_threshold
 from utils.generate_intra_graph_db import generate_small_mol_graph_datasets, generate_macro_mol_graph_datasets
@@ -18,64 +18,88 @@ from utils.intra_graph_dataset import IntraGraphDataset
 
 
 # training fuction on each epoch
-def train_intra(encoder, decoder, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
+def train(encoder, decoder, dgi_model,
+          opt, loss_fn: dict,
+          mol_graphs,
+          train_pos_graph, train_neg_graph,
+          pred_rels):
     encoder.train()
     decoder.train()
+    dgi_model.train()
     opt.zero_grad()
+    # emb_intra: dict, keys: "small", "bio", "target"
+    # emb_inter: dict, keys: "drug", "target"
     emb_intra, emb_inter = encoder(mol_graphs,
                                    train_pos_graph,
                                    pred_rels=pred_rels)
-    pos_score = decoder(train_pos_graph, emb_intra, emb_inter,
-                        pred_rels=pred_rels)
-    neg_score = decoder(train_neg_graph, emb_intra, emb_inter,
-                        pred_rels=pred_rels)
-    print(pos_score)
-    print(neg_score)
-    labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
-    scores = torch.cat([pos_score, neg_score]).numpy()
 
-    loss = loss_fn['BCE'](labels, scores)
-    if 'ERROR' in loss_fn:
-        loss += loss_fn['DIFF'](emb_intra, emb_inter)
-    # loss = .mean() loss. (.to(device))
-    loss.backward()
+    dgi_loss = dgi_model(emb_intra, emb_inter,
+                         train_pos_graph, train_neg_graph)
+
+    # decoder:  return dict,
+    #           keys: intra, inter, mix
+    pos_scores = decoder(train_pos_graph, emb_intra, emb_inter,
+                         pred_rels=pred_rels)
+    neg_scores = decoder(train_neg_graph, emb_intra, emb_inter,
+                         pred_rels=pred_rels)
+    labels = torch.cat([torch.ones(pos_scores[0].shape[0]), torch.zeros(neg_scores[0].shape[0])]).numpy()
+    losses = {'dgi': dgi_loss}
+    for i in ('intra', 'inter', 'mix'):
+        losses[i] = loss_fn[i](torch.cat([pos_scores[i], neg_scores[i]]).numpy(), labels)
+    curr_loss = torch.stack(list(losses.values())).sum()
+    curr_loss.backward()
     opt.step()
-    print('Train epoch: {} Loss: {:.6f}'.format(epoch, loss.item()))
+    print('Train epoch: {} Loss: {:.6f}'.format(epoch, curr_loss.item()))
     return emb_intra, emb_inter
 
 
-# training fuction on each epoch
-def train_both(model, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
-    model.train()
-    opt.zero_grad()
-    emb_intra, emb_inter = encoder(mol_graphs,
-                                   train_pos_graph,
-                                   pred_rels=pred_rels)
-    pos_score_intra, pos_score_inter = decoder(train_pos_graph, emb_intra, emb_inter,
-                        pred_rels=pred_rels)
-    neg_score_intra, neg_score_inter = decoder(train_neg_graph, emb_intra, emb_inter,
-                        pred_rels=pred_rels)
-    print(pos_score_intra)
-    print(neg_score_intra)
-    print(pos_score_inter)
-    print(neg_score_inter)
-    labels = torch.cat([torch.ones(pos_score_inter.shape[0]), torch.zeros(neg_score_inter.shape[0])]).numpy()
-    intra_scores = torch.cat([pos_score_intra, neg_score_intra]).numpy()
-    inter_scores = torch.cat([pos_score_inter, neg_score_inter]).numpy()
-    loss = loss_fn['BCE'](labels, scores)
-    if 'ERROR' in loss_fn:
-        loss += loss_fn['DIFF'](emb_intra)
-    # loss = loss_fn(output, data.y.view(-1, 1).float().to(device)).mean()
-    loss.backward()
-    opt.step()
-    print('Train epoch: {} Loss: {:.6f}'.format(epoch, loss.item()))
-    return emb_intra, emb_inter
+# # training fuction on each epoch
+# def train_both(encoder, decoder, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
+#     encoder.train()
+#     decoder.train()
+#     opt.zero_grad()
+#     emb_intra, emb_inter = encoder(mol_graphs,
+#                                    train_pos_graph)
+#     pos_score_intra, pos_score_inter = decoder(train_pos_graph, emb_intra, emb_inter,
+#                                                pred_rels=pred_rels)
+#     neg_score_intra, neg_score_inter = decoder(train_neg_graph, emb_intra, emb_inter,
+#                                                pred_rels=pred_rels)
+#     print(pos_score_intra)
+#     print(neg_score_intra)
+#     print(pos_score_inter)
+#     print(neg_score_inter)
+#     labels = torch.cat([torch.ones(pos_score_inter.shape[0]), torch.zeros(neg_score_inter.shape[0])]).numpy()
+#     intra_scores = torch.cat([pos_score_intra, neg_score_intra]).numpy()
+#     inter_scores = torch.cat([pos_score_inter, neg_score_inter]).numpy()
+#
+#     # encoder:
+#     # - GNN for small molecules (attentive FP or ...)
+#     # - CNN/RNN/GNN for macro molecules
+#
+#     # decoder:
+#     # - Decagon(DistMulti/Bilinear/Dot) multi-relational
+#
+#     # multi-view alignment straightforward extension for heterogeneous graphs?
+#     # - MIRACLE-DGIloss Deep Graph Infomax (mutual information maximization) https://github.com/dmlc/dgl/blob/master/examples/pytorch/dgi/dgi.py
+#     # - DEAL(Dual Encoder with ALignment (mutual information maximization)
+#     #   the idea of loose-alignment is similar with constrasive learning applied in MIRACLE
+#
+#     # handling missing intra-/inter-view): DEAL
+#
+#     loss = loss_fn['BCE'](labels, scores, )
+#     if 'ERROR' in loss_fn:
+#         loss += loss_fn['DIFF'](emb_intra)
+#     # loss = loss_fn(output, data.y.view(-1, 1).float().to(device)).mean()
+#     loss.backward()
+#     opt.step()
+#     print('Train epoch: {} Loss: {:.6f}'.format(epoch, loss.item()))
+#     return emb_intra, emb_inter
 
 
 def predicting(model,
                intra_feats, inter_feats,
                pos_edges, neg_edges):
-    pos_score, neg_score = model.pred(intra_feats, inter_feats, pos_edges, neg_edges)
+    pos_score, neg_score = model(intra_feats, inter_feats, pos_edges, neg_edges)
     labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
     return labels, torch.cat([pos_score, neg_score]).numpy()
 
@@ -134,15 +158,12 @@ if __name__ == '__main__':
     params.aa_node_insize = macro_mol_graphs.get_nfeat_dim()
     params.aa_edge_insize = macro_mol_graphs.get_efeat_dim()
 
-    edge_type2decoder = {
-        'tt': 'dedicom',
-        'dt': 'bilinear',
-        '~dt': 'bilinear',
-        'dd': 'dedicom'
-    }
-
-    dt_types = {'dt'} if params.dataset != 'full_drugbank' else {'targets', 'enzymes', 'carriers', 'transporters'}
-    tt_types = {'tt'} if params.dataset != 'full_drugbank' else {}
+    # edge_type2decoder = {
+    #     'tt': 'dedicom',
+    #     'dt': 'bilinear',
+    #     '~dt': 'bilinear',
+    #     'dd': 'dedicom'
+    # }
 
     # load the inter-view graph
     pos_adj_dict, neg_adj_dict, \
@@ -151,15 +172,15 @@ if __name__ == '__main__':
     id2drug, id2target, id2relation, \
     drug_cnt, target_cnt, small_cnt = dd_dt_tt_build_inter_graph_from_links(
         dataset=params.dataset,
-        tt_types=tt_types,
-        dt_types=dt_types,
         split=params.split
     )
     # init pos/neg inter-graph
     train_pos_graph, train_neg_graph = ssp_multigraph_to_dgl(
+        drug_cnt, target_cnt,
         adjs=pos_adj_dict,
         relation2id=relation2id
     ), ssp_multigraph_to_dgl(
+        drug_cnt, target_cnt,
         adjs=neg_adj_dict,
         relation2id=relation2id
     )
@@ -179,7 +200,6 @@ if __name__ == '__main__':
     else:
         params.device = torch.device('cpu')
 
-    params.epoch_intra = 25
     params.intra_enc1 = 'afp'
     params.intra_enc2 = 'afp'  # 'rnn'
     params.loss = 'focal'
@@ -217,22 +237,17 @@ if __name__ == '__main__':
 
     if not params.is_test:
         # init model, opt, loss
-        encoder, decoder = initialize_BioMIP(params, edge_type2decoder)
-        opt = build_optimizer(encoder, decoder, params)
+        encoder, decoder, dgi_model = initialize_BioMIP(params)
+        opt = build_optimizer(encoder, decoder, dgi_model, params)
         loss_fn = select_loss_function(params.loss)  # a loss dict 'loss name': (weight, loss_fuction)
         best_auc = 0.
         best_epoch = -1
         for epoch in range(1, params.n_epoch + 1):
-            if epoch <= params.epoch_intra:
-                emb_intra, emb_inter = train_intra(encoder, decoder, opt, loss_fn,
-                                                   mol_graphs,
-                                                   train_pos_graph, train_neg_graph,
-                                                   pred_rels=params.pred_rels)
-            else:
-                emb_intra, emb_inter = train_both(encoder, decoder, opt, loss_fn,
-                                                  mol_graphs,
-                                                  train_pos_graph, train_neg_graph,
-                                                  pred_rels=params.pred_rels)
+            emb_intra, emb_inter = train(encoder, decoder, dgi_model,
+                                         opt, loss_fn,
+                                         mol_graphs,
+                                         train_pos_graph, train_neg_graph,
+                                         pred_rels=params.pred_rels)
             print('predicting for valid data')
             val_G, val_P = predicting(encoder,
                                       emb_intra, emb_inter,
@@ -247,9 +262,9 @@ if __name__ == '__main__':
                 print(f'val AUROC {val}, AUPRC {metrics.average_precision_score(val_G, val_P)}, '
                       f'F1: {metrics.f1_score(val_G, eval_threshold(val_G, val_P)[1])}')
                 print('predicting for test data')
-                test_G, test_P = predicting(encoder,
+                test_G, test_P = predicting(decoder,
                                             emb_intra, emb_inter,
-                                            triplets['valid']['pos'], triplets['valid']['neg'])
+                                            triplets['test']['pos'], triplets['test']['neg'])
                 auroc, auprc, f1 = metrics.roc_auc_score(test_G, test_P), \
                                    metrics.average_precision_score(test_G, test_P), \
                                    metrics.f1_score(test_G, eval_threshold(val_G, val_P))

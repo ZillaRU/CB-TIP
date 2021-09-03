@@ -4,7 +4,10 @@ import torch.nn as nn
 from torch.optim import Optimizer, Adam
 
 
-def build_optimizer(model: nn.Module, args: Namespace) -> Optimizer:
+def build_optimizer(encoder: nn.Module,
+                    decoder: nn.Module,
+                    MIM_model: nn.Module,
+                    args: Namespace) -> Optimizer:
     """
     Builds an Optimizer.
 
@@ -12,7 +15,11 @@ def build_optimizer(model: nn.Module, args: Namespace) -> Optimizer:
     :param args: Arguments.
     :return: An initialized Optimizer.
     """
-    params = [{'params': model.parameters(), 'lr': args.learning_rate, 'weight_decay': 0}]
+    params = [
+        {'params': encoder.parameters(), 'lr': args.enc_lr, 'weight_decay': 0},
+        {'params': decoder.parameters(), 'lr': args.dec_lr, 'weight_decay': 0},
+        {'params': MIM_model.parameters(), 'lr': args.mim_lr, 'weight_decay': 0}
+    ]
 
     return Adam(params)
 
