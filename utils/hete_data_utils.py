@@ -8,18 +8,25 @@ from scipy.sparse import csc_matrix
 def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, saved_relation2id=None):
     files = {
         'train': {
-            'pos': f'data/{dataset}/{split}/train_pos.txt',
-            'neg': f'data/{dataset}/{split}/train_neg.txt'
+            'pos': f'data/{dataset}{split}/train_pos.txt',
+            'neg': f'data/{dataset}{split}/train_neg.txt'
         },
         'valid': {
-            'pos': f'data/{dataset}/{split}/valid_pos.txt',
-            'neg': f'data/{dataset}/{split}/train_neg.txt'
+            'pos': f'data/{dataset}{split}/valid_pos.txt',
+            'neg': f'data/{dataset}{split}/train_neg.txt'
+        },
+        'test': {
+            'pos':  f'data/{dataset}{split}/test_pos.txt',
+            'neg':  f'data/{dataset}{split}/test_neg.txt'
         }
     }
+    dti_file = f'data/{dataset}/DTIs.csv'
+    tti_file = f'data/{dataset}/TTIs.csv'
+
     drug2id, target2id = {}, {}
 
-    if dataset == 'full_drugbank':
-        biodrug_set = set(pd.read_csv(f'data/{dataset}/drug_seqs.csv', header=None).iloc[:, 0])
+    if dataset == 'full':
+        biodrug_set = set(pd.read_csv(f'data/{dataset}/biotech_seqs.csv', header=None).iloc[:, 0])
         bio_cnt = 0
         bio2id = {}
         # dd_types
@@ -51,8 +58,8 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
         triplets[file_type] = {}
         dd_dt_tt_triplets[file_type] = {}
         for y, path in file_paths.items():  # pos/neg, path
-            if dataset == 'full_drugbank':  # asymmetric
-                dd_dt_tt_data= {}
+            if dataset == 'full':  # asymmetric
+                dd_dt_tt_data = {}
                 dd_dt_tt_data[('small', 'small')] = []
                 dd_dt_tt_data[('small', 'macro')] = []
                 dd_dt_tt_data[('macro', 'small')] = []
@@ -75,12 +82,12 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
                     u_is_d, v_is_d = True, True
                 elif r == 'tt':
                     u_is_d, v_is_d = False, False
-                elif dataset == 'full_drugbank':  # for drugbank
+                elif dataset == 'full':  # for drugbank
                     u_is_d, v_is_d = u.startswith('DB'), v.startswith('DB')
                     u_is_bio, v_is_bio = u in biodrug_set, v in biodrug_set
                 else:
                     raise NotImplementedError
-                if dataset != 'full_drugbank':
+                if dataset != 'full':
                     if u_is_d:
                         if u not in drug2id:
                             uid = drug2id[u] = small_cnt
@@ -146,7 +153,7 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
                 # Save the triplets corresponding to only the known relations
                 if r in relation2id:
                     temp = [uid, vid, relation2id[r]]
-                    if dataset != 'full_drugbank':
+                    if dataset != 'full':
                         data.append(temp)
                         dd_dt_tt_data[type_dict[(u_is_d, v_is_d)]].append(temp)
                     else:
@@ -227,7 +234,7 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, tt_types, dt_types, split, sa
            drug_cnt, target_cnt, small_cnt
 
 
-def ssp_multigraph_to_dgl(adjs, relation2id):
+def ssp_multigraph_to_dgl(drug_cnt, target_cnt, adjs, relation2id):
     adjs = {k: v.tocoo() for k, v in adjs.items()}
     # g_dgl = dgl.heterograph({
     #     k: (torch.from_numpy(v.row), torch.from_numpy(v.col)) for k, v in adjs.items()
@@ -250,5 +257,10 @@ def ssp_multigraph_to_dgl(adjs, relation2id):
     #         torch.from_numpy(np.hstack((v.col, v.row))))
     #     for k, v in adjs.items()
     # })
-    g_dgl = dgl.heterograph(graph_dict)
+    # CAUTION: must assign the num_nodes_dict explicitly, since there are isolated molecules in pos_train_graph
+    g_dgl = dgl.heterograph(graph_dict,
+                            num_nodes_dict={
+                                'drug': drug_cnt,
+                                'target': target_cnt
+                            })
     return g_dgl, relation2id
