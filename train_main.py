@@ -301,9 +301,9 @@ if __name__ == '__main__':
                                                            metrics.f1_score(test_G, eval_threshold(test_G, test_P2)[1])
                 if not os.path.exists(f'results/{result_file_name}'):
                     with open(f'results/{result_file_name}', 'w') as f:
-                        f.write('epoch,auroc,ap,auprc,f1\n')
+                        f.write('epoch,auroc,auprc,ap,f1\n')
                 with open(f'results/{result_file_name}', 'a+') as f:
-                    f.write(f'{epoch},{test_auroc},{test_ap},{test_auprc},{test_f1}\n')
+                    f.write(f'{epoch},{test_auroc},{test_auprc},{test_ap},{test_f1}\n')
 
         # calculate and sace the final test results
         encoder.load_state_dict(torch.load(f'trained_models/encoder_{model_file_name})'))
