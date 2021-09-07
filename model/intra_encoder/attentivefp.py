@@ -220,7 +220,7 @@ class GetContext(nn.Module):
         """
         g = g.local_var()
         g.ndata['hv'] = node_feats
-        # print(node_feats)
+        # print("wtf", node_feats.shape, edge_feats.shape)
         g.ndata['hv_new'] = self.project_node(node_feats)
         g.edata['he'] = edge_feats
 

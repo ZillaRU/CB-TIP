@@ -167,11 +167,10 @@ def build_seq_to_graph(args):
     g.ndata['nfeats'] = torch.tensor(mol_feature, dtype=torch.float32)
     g.edata['efeats'] = torch.ones([g.num_edges(), 1], dtype=torch.float32)  # todo
     datum = {
-        # 'mol_id': mol_id,
         'seq': seq,
         'mol_graph': g
     }
-    # idx = '{:08}'.format(idx).encode('ascii')
+
     idx = mol_id.encode('ascii')
     return (idx, datum)
 
@@ -199,11 +198,6 @@ def generate_small_mol_graph_datasets(params):
     edge_feat_dim = temp_g.edata['efeats'].shape[1]
     logging.info(f'node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
 
-    # with mp.Pool(processes=None) as p:
-    #     for (idx, datum) in tqdm(p.imap(build_molecule_graph, seq_list), total=num_mol):
-    #         graph_sizes.append(datum['graph_size'])
-    #         with env.begin(write=True, db=env.open_db(dbname.encode())) as txn:
-    #             txn.put(idx, serialize(datum))
     for [_id, _val] in seq_list:
         idx, datum = build_molecule_graph((_id, _val))
         if idx == -1:
@@ -227,19 +221,20 @@ def generate_small_mol_graph_datasets(params):
 def generate_macro_mol_graph_datasets(params):
     dbname = 'macro_mol'
     logging.info(f"Construct intra-view graphs for macro molecules in {params.dataset}...")
-    seq_csv = pd.read_csv(f'data/{params.dataset}/macro_seqs.csv', header=None)
+    seq_list = pd.read_csv(f'data/{params.dataset}/target_seqs.csv', header=None).values.tolist()
+    if params.dataset == 'full':
+        seq_list += pd.read_csv(f'data/{params.dataset}/biotech_seqs.csv', header=None).values.tolist()
 
     # todo: fix map_size
     env = lmdb.open(params.macro_mol_db_path, map_size=1e9, max_dbs=6)
 
-    num_mol = seq_csv.shape[0]
+    num_mol = len(seq_list)
 
     with env.begin(write=True, db=env.open_db(dbname.encode())) as txn:
         txn.put('num_graphs'.encode(), num_mol.to_bytes(int.bit_length(num_mol), byteorder='little'))
 
     graph_sizes = []
 
-    seq_list = np.array(seq_csv).tolist()
     # get node_feature_dimension and edge_feature_dimension
     init_folder(params)
     _, g_datum = build_seq_to_graph((seq_list[0][0], seq_list[0][1]))
@@ -248,12 +243,7 @@ def generate_macro_mol_graph_datasets(params):
     edge_feat_dim = temp_g.edata['efeats'].shape[1]
     logging.info(f'node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
 
-    # with mp.Pool(processes=None) as p:
-    #     for (idx, datum) in tqdm(p.imap(build_seq_to_graph, seq_list), total=num_mol):
-    #         graph_sizes.append(len(datum['seq']))
-    #         with env.begin(write=True, db=env.open_db(dbname.encode())) as txn:
-    #             txn.put(idx, serialize(datum))
-    for [_id, _val] in seq_list:
+    for _id, _val in seq_list:
         idx, datum = build_seq_to_graph((_id, _val))
         if idx == -1:
             print(_id)

@@ -6,7 +6,7 @@ from utils.data_utils import deserialize_small, deserialize_macro
 
 class IntraGraphDataset(Dataset):
     def __init__(self, db_path, db_name):
-        print(db_path)
+        # print(db_path)
         self.main_env = lmdb.open(db_path, readonly=True, max_dbs=3, lock=False)
         self.db = self.main_env.open_db(db_name.encode())
         self.deserialize = deserialize_small if db_name == 'small_mol' else deserialize_macro

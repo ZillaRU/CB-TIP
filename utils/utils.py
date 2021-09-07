@@ -1,24 +1,22 @@
 import logging
 import math
 import os
-from typing import Callable, List, Tuple, Union
 from argparse import Namespace
+from typing import Callable, List, Tuple, Union
 
-from sklearn.metrics import auc, mean_absolute_error, mean_squared_error, precision_recall_curve, r2_score, \
-    roc_auc_score, accuracy_score, log_loss, roc_curve, accuracy_score
 import torch
 import torch.nn as nn
+from sklearn import metrics
+from sklearn.metrics import auc, mean_absolute_error, mean_squared_error, precision_recall_curve, r2_score, \
+    roc_auc_score, log_loss, accuracy_score
 from torch.optim import Adam, Optimizer
-from torch.optim.lr_scheduler import _LRScheduler
+# from torch.optim.lr_scheduler import _LRScheduler
 
-from model.nn_utils import NoamLR
+# from model.nn_utils import NoamLR
 from utils.scaler import StandardScaler
-import socket
-#from sklearn.externals import joblib
-import joblib
-import json
-import glob
-import numpy as np
+
+
+# from sklearn.externals import joblib
 
 
 def makedirs(path: str, isfile: bool = False):
@@ -195,30 +193,27 @@ def build_optimizer(model: nn.Module, args: Namespace) -> Optimizer:
     return Adam(params)
 
 
-from torch.optim.lr_scheduler import MultiStepLR
-
-
-def build_lr_scheduler(optimizer: Optimizer, args: Namespace, total_epochs: List[int] = None) -> _LRScheduler:
-    """
-    Builds a learning rate scheduler.
-
-    :param optimizer: The Optimizer whose learning rate will be scheduled.
-    :param args: Arguments.
-    :param total_epochs: The total number of epochs for which the model will be run.
-    :return: An initialized learning rate scheduler.
-    """
-    # Learning rate scheduler
-
-    # select lr scheduler according to the option 'lr_scheduler'
-    return NoamLR(
-        optimizer=optimizer,
-        warmup_epochs=[args.warmup_epochs],
-        total_epochs=total_epochs or [args.epochs] * args.num_lrs,
-        steps_per_epoch=args.train_data_size // args.batch_size,
-        init_lr=[args.init_lr],
-        max_lr=[args.max_lr],
-        final_lr=[args.final_lr]
-    )
+# def build_lr_scheduler(optimizer: Optimizer, args: Namespace, total_epochs: List[int] = None) -> _LRScheduler:
+#     """
+#     Builds a learning rate scheduler.
+#
+#     :param optimizer: The Optimizer whose learning rate will be scheduled.
+#     :param args: Arguments.
+#     :param total_epochs: The total number of epochs for which the model will be run.
+#     :return: An initialized learning rate scheduler.
+#     """
+#     # Learning rate scheduler
+#
+#     # select lr scheduler according to the option 'lr_scheduler'
+#     return NoamLR(
+#         optimizer=optimizer,
+#         warmup_epochs=[args.warmup_epochs],
+#         total_epochs=total_epochs or [args.epochs] * args.num_lrs,
+#         steps_per_epoch=args.train_data_size // args.batch_size,
+#         init_lr=[args.init_lr],
+#         max_lr=[args.max_lr],
+#         final_lr=[args.final_lr]
+#     )
 
 
 def create_logger(name: str, save_dir: str = None, quiet: bool = False) -> logging.Logger:
@@ -258,12 +253,15 @@ def create_logger(name: str, save_dir: str = None, quiet: bool = False) -> loggi
 
     return logger
 
+
 def get_available_pretrain_methods():
     return ['mol2vec']
 
+
 def get_available_data_types():
     return ['small']
-    
+
+
 def gen_preds(edges_pos, edges_neg, adj_rec):
     preds = []
     for e in edges_pos:
@@ -275,21 +273,6 @@ def gen_preds(edges_pos, edges_neg, adj_rec):
 
     return preds, preds_neg
 
-def eval_threshold(labels_all, preds_all, preds, edges_pos, edges_neg, adj_rec, test):
-    for i in range(int(0.5 * len(labels_all))):
-        if preds_all[2*i] > 0.95 and preds_all[2*i+1] > 0.95:
-            preds_all[2*i] = max(preds_all[2*i], preds_all[2*i+1])
-            preds_all[2*i+1] = preds_all[2*i]
-        else:
-            preds_all[2*i] = min(preds_all[2*i], preds_all[2*i+1])
-            preds_all[2*i+1] = preds_all[2*i]
-    fpr, tpr, thresholds = roc_curve(labels_all, preds_all)
-    optimal_idx = np.argmax(tpr - fpr)
-    optimal_threshold = thresholds[optimal_idx]
-    preds_all_ = []
-    for p in preds_all:
-        if p >=optimal_threshold:
-            preds_all_.append(1)
-        else:
-            preds_all_.append(0)
-    return preds_all, preds_all_
+def calc_aupr(label, prob):
+    precision, recall, _thresholds = metrics.precision_recall_curve(label, prob)
+    return metrics.auc(recall, precision)

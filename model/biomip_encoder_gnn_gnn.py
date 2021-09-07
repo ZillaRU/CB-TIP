@@ -32,15 +32,19 @@ class BioMIP_encoder(nn.Module):
 
     def forward(self, mol_structs, pos_graph):
         small_bg = dgl.batch(mol_structs['small'])  # to("cuda:x")
+
+        # print(small_bg, "\nsmall intra encoder forward")
         small_mol_feats = self.small_intra(small_bg, small_bg.ndata['nfeats'].to(torch.float32),
                                            small_bg.edata['efeats'].to(torch.float32))
         target_bg = dgl.batch(mol_structs['target'])  # .to("cuda:0")
+        # print(target_bg, "\ntarget intra encoder forward")
         target_mol_feats = self.macro_intra(target_bg, target_bg.ndata['nfeats'].to(torch.float32),
                                             target_bg.edata['efeats'].to(torch.float32))
         bio_mol_feats = None
         if 'bio' in mol_structs:
             bio_bg = dgl.batch(mol_structs['bio'])
-            bio_mol_feats = self.small_intra(bio_bg, bio_bg.ndata['nfeats'].to(torch.float32),
+            # print(bio_bg, "\nbio intra encoder forward")
+            bio_mol_feats = self.macro_intra(bio_bg, bio_bg.ndata['nfeats'].to(torch.float32),
                                              bio_bg.edata['efeats'].to(torch.float32))
         pos_graph.nodes['drug'].data['intra'] = torch.cat([small_mol_feats, bio_mol_feats], 0) \
             if 'bio' in mol_structs else small_mol_feats
@@ -49,4 +53,4 @@ class BioMIP_encoder(nn.Module):
                    'small': small_mol_feats,
                    'bio': bio_mol_feats,
                    'target': target_mol_feats
-               }, pos_graph.self.inter_gnn(pos_graph)
+               }, self.inter_gnn(pos_graph)

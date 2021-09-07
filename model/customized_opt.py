@@ -5,7 +5,8 @@ from torch.optim import Optimizer, Adam
 
 
 def build_optimizer(encoder: nn.Module,
-                    decoder: nn.Module,
+                    decoder1: nn.Module,
+                    decoder2: nn.Module,
                     MIM_model: nn.Module,
                     args: Namespace) -> Optimizer:
     """
@@ -16,9 +17,13 @@ def build_optimizer(encoder: nn.Module,
     :return: An initialized Optimizer.
     """
     params = [
-        {'params': encoder.parameters(), 'lr': args.enc_lr, 'weight_decay': 0},
-        {'params': decoder.parameters(), 'lr': args.dec_lr, 'weight_decay': 0},
-        {'params': MIM_model.parameters(), 'lr': args.mim_lr, 'weight_decay': 0}
+        # {'params': encoder.parameters(), 'lr': args.enc_lr, 'weight_decay': 0},
+        # {'params': decoder.parameters(), 'lr': args.dec_lr, 'weight_decay': 0},
+        # {'params': MIM_model.parameters(), 'lr': args.mim_lr, 'weight_decay': 0}
+        {'params': encoder.parameters(), 'lr': args.learning_rate, 'weight_decay': 0},
+        {'params': decoder1.parameters(), 'lr': args.learning_rate, 'weight_decay': 0},
+        {'params': decoder2.parameters(), 'lr': args.learning_rate, 'weight_decay': 0},
+        {'params': MIM_model.parameters(), 'lr': args.learning_rate, 'weight_decay': 0}
     ]
 
     return Adam(params)

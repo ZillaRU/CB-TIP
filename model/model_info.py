@@ -18,10 +18,11 @@ from model.losses_info import local_global_loss_
 class GcnInfomax1(nn.Module):
     def __init__(self, args: Namespace, gamma=.1):
         super(GcnInfomax1, self).__init__()
+        self.args = args
         self.gamma = gamma
-        self.prior = args.prior
-        self.small_ff = FF_net(args.intra_out_dim, [96, 96], args.ff_intra)
-        self.macro_ff = FF_net(args.intra_out_dim, [96, 96], args.ff_intra)
+        self.prior = False # args.prior
+        self.small_ff = FF_net(args.intra_out_dim, [96, 96], args.emb_dim) # args.ff_intra)
+        self.macro_ff = FF_net(args.intra_out_dim, [96, 96], args.emb_dim) # args.ff_intra)
         self.drug_ff = FF_net(args.emb_dim, [128, 128], args.emb_dim)
         self.target_ff = FF_net(args.emb_dim, [128, 128], args.emb_dim)
         if self.prior:
@@ -42,7 +43,7 @@ class GcnInfomax1(nn.Module):
 
         target_mol_local_global_loss = local_global_loss_(self.args, t_intra_attr, t_inter_enc,
                                                           dgl.to_homogeneous(dgl.node_subgraph(pos_graph, {'target': list(range(t_intra_attr.shape[0]))})),
-                                                          dgl.to_homogeneous(dgl.node_subgraph(neg_graph, {'target': list(range(t_intra_attr.shape[0]))})),
+                                                          None,
                                                           measure)
         # small_target_local_global_loss = hete_local_global_loss_(self.args,
         #                                                          s_intra_attr, s_inter_enc,

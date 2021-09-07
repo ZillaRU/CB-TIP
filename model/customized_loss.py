@@ -6,7 +6,8 @@ from torch.nn import functional as F
 
 def select_loss_function(loss_select):
     return {
-        'ERROR': nn.BCEWithLogitsLoss() if loss_select == 'focal' else BCEFocalLoss()
+        'ERROR': nn.BCEWithLogitsLoss(reduction='none') if loss_select == 'focal' else BCEFocalLoss(),
+        'DIFF': nn.KLDivLoss(reduction='none')
     }
 
 
@@ -76,7 +77,7 @@ class AutomaticWeightedLoss(nn.Module):
         self.params = torch.nn.Parameter(params)
 
     def forward(self, *x):
-        print("weight", self.params.data)
+        # print("weight", self.params.data)
         loss_sum = 0
         for i, loss in enumerate(x):
             loss_sum += 0.5 / (self.params[i] ** 2) * loss + torch.log(1 + self.params[i] ** 2)

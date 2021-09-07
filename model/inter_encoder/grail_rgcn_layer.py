@@ -84,7 +84,7 @@ class RGCNLayer(nn.Module):
                     , dim=1
                 )
                 # g.ndata['repr'][ntype] = torch.cat([g.ndata['repr'][ntype], g.ndata['h'][ntype].unsqueeze(1)], dim=1)
-                print("g.nodes[ntype].data['repr']", g.nodes[ntype].data['repr'].shape)
+                # print("g.nodes[ntype].data['repr']", g.nodes[ntype].data['repr'].shape)
 
 
 class RGCNBasisLayer(RGCNLayer):
@@ -144,7 +144,7 @@ class RGCNBasisLayer(RGCNLayer):
         # generate all weights from bases
         weight = self.weight.view(self.num_bases, self.inp_dim * self.out_dim)
         weight = torch.matmul(self.w_comp, weight).view(self.num_rels, self.inp_dim, self.out_dim)
-        print("weight.device: ", weight.device)
+        # print("weight.device: ", weight.device)
         for etype in g.canonical_etypes:
             g.edges[etype].data['w'] = self.edge_dropout(torch.ones(g.number_of_edges(etype), 1).to(weight.device))
             # g.edges[etype].data['w'] = self.edge_dropout(torch.ones(g.number_of_edges(), 1).to(weight.device))
@@ -156,7 +156,7 @@ class RGCNBasisLayer(RGCNLayer):
 
         def msg_func(edges):
             etype_id = self.rel2id[edges.canonical_etype[1]]
-            print("edges.rel", etype_id)
+            # print("edges.rel", etype_id)
             # print("['h']", edges.src['h'], edges.dst['h'])  # '_ID' 'intra' 'h'
             # print("edges.data", edges.data)
             # w = weight.index_select(0, edges.data['type'])
@@ -179,9 +179,9 @@ class RGCNBasisLayer(RGCNLayer):
         # , self.aggregator, None)
         for etype in g.canonical_etypes:
             # print(src_type, etype, des_type)
-            print("canonical_etypes ['h']\n", g.nodes['drug'].data, g.nodes['target'].data)  # '_ID' 'intra' 'h'
+            # print("canonical_etypes ['h']\n", g.nodes['drug'].data, g.nodes['target'].data)  # '_ID' 'intra' 'h'
             g[etype].update_all(message_func=msg_func,
                                 reduce_func=self.aggregator,
                                 # apply_node_func=,
                                 etype=etype)
-            print(" -- canonical_etypes ['h']\n", g.nodes['drug'].data, g.nodes['target'].data)  # '_ID' 'intra' 'h'
+            # print(" -- canonical_etypes ['h']\n", g.nodes['drug'].data, g.nodes['target'].data)  # '_ID' 'intra' 'h'

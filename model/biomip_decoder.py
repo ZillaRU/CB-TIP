@@ -7,6 +7,8 @@ import torch.nn.functional as F
 #########################################################################
 # Decoder - Multirelational Link Prediction
 #########################################################################
+from dgl._deprecate.graph import DGLGraph
+
 from model.dropout_utils import dropout
 from model.init_utils import init_glorot
 
@@ -14,15 +16,27 @@ from model.init_utils import init_glorot
 class MultiInnerProductDecoder(nn.Module):
     def __init__(self, in_dim, num_et):
         super(MultiInnerProductDecoder, self).__init__()
-        self.num_et = num_et
+        self.num_et = num_et-2
         self.in_dim = in_dim
         self.weight = nn.Parameter(torch.Tensor(num_et, in_dim))
-
         self.reset_parameters()
 
-    def forward(self, z, edge_index, edge_type, sigmoid=True):
-        value = (z[edge_index[0]] * z[edge_index[1]] * self.weight[edge_type]).sum(dim=1)
-        return torch.sigmoid(value) if sigmoid else value
+    # def forward(self, z, edge_index, edge_type, sigmoid=True):
+        # value = (z[edge_index[0]] * z[edge_index[1]] * self.weight[edge_type]).sum(dim=1)
+        # return torch.sigmoid(value) if sigmoid else value
+    def forward(self,graph, z, sigmoid=True, test=False):
+        # if test: # return res of each type in dict
+        # if isinstance(graph, DGLGraph):
+        rel_types = graph.canonical_etypes[:-2]
+        res = {}
+        for etype_id in range(len(rel_types)):
+            edge_index0, edge_index1 = graph.edges(etype=rel_types[etype_id])
+            value = (z[edge_index0.long()] * z[edge_index1.long()] * self.weight[etype_id]).sum(dim=1)
+            # assert torch.equal(torch.isnan(value), torch.tensor(False, dtype=torch.bool))
+            res[rel_types[etype_id]] = torch.sigmoid(value) if sigmoid else value
+            # else:
+        #     raise NotImplementedError
+        return res
 
     def reset_parameters(self):
         self.weight.data.normal_(std=1 / np.sqrt(self.in_dim))
