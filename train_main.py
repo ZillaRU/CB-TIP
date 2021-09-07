@@ -2,6 +2,7 @@ import logging
 import os
 import time
 
+import pandas as pd
 import torch
 from sklearn import metrics
 
@@ -14,8 +15,6 @@ from utils.generate_intra_graph_db import generate_small_mol_graph_datasets, gen
 from utils.hete_data_utils import ssp_multigraph_to_dgl, \
     dd_dt_tt_build_inter_graph_from_links, build_valid_test_graph
 from utils.intra_graph_dataset import IntraGraphDataset
-
-
 # training fuction on each epoch
 from utils.utils import calc_aupr
 
@@ -111,7 +110,16 @@ def train(encoder, decoder_intra, decoder_inter, dgi_model,
 
 def predicting(model_intra, model_inter,
                intra_feats, inter_feats,
-               pos_g, neg_g):
+               pos_g, neg_g,
+               multi_res=False):
+    if multi_res:
+        pos_pred, neg_pred = model_inter(pos_g, inter_feats), model_inter(neg_g, inter_feats)
+        res = {}
+        for k in pos_g.canonical_etypes[:-2]:
+            res[k] = (torch.cat([torch.ones(pos_pred[k].shape[0]), torch.zeros(neg_pred[k].shape[0])]).numpy(),
+                      torch.cat([pos_pred[k], neg_pred[k]]).detach().numpy())
+        return res
+
     pos_score1 = torch.hstack(tuple(model_intra(pos_g, intra_feats).values()))
     neg_score1 = torch.hstack(tuple(model_intra(neg_g, intra_feats).values()))
     pos_score2 = torch.hstack(tuple(model_inter(pos_g, inter_feats).values()))
@@ -287,13 +295,54 @@ if __name__ == '__main__':
                                                       tgp, tgn)
                 # AP
 
-                auroc, ap, auprc, f1 = metrics.roc_auc_score(test_G, test_P2), \
-                                metrics.average_precision_score(test_G, test_P2),\
-                                calc_aupr(test_G, test_P2),\
-                                metrics.f1_score(test_G, eval_threshold(test_G, test_P2)[1])
+                test_auroc, test_ap, test_auprc, test_f1 = metrics.roc_auc_score(test_G, test_P2), \
+                                                           metrics.average_precision_score(test_G, test_P2), \
+                                                           calc_aupr(test_G, test_P2), \
+                                                           metrics.f1_score(test_G, eval_threshold(test_G, test_P2)[1])
                 if not os.path.exists(f'results/{result_file_name}'):
                     with open(f'results/{result_file_name}', 'w') as f:
-                        f.write('epoch,dataset,auroc,ap,auprc,f1\n')
+                        f.write('epoch,auroc,ap,auprc,f1\n')
                 with open(f'results/{result_file_name}', 'a+') as f:
-                    f.write(f'{epoch},{params.dataset},{auroc},{ap},{auprc},{f1}\n')
+                    f.write(f'{epoch},{test_auroc},{test_ap},{test_auprc},{test_f1}\n')
 
+        # calculate and sace the final test results
+        encoder.load_state_dict(torch.load(f'trained_models/encoder_{model_file_name})'))
+        decoder_inter.load_state_dict(torch.load(f'trained_models/interdec_{model_file_name})'))
+        decoder_intra.load_state_dict(torch.load(f'trained_models/interdec_{model_file_name})'))
+        emb_intra, emb_inter = encoder(mol_graphs, train_pos_graph)
+        rel2gt_pred = predicting(decoder_intra, decoder_inter,
+                                 emb_intra, emb_inter,
+                                 tgp, tgn,
+                                 multi_res=True)
+
+        # parse the rel_id to raw relation type for comparison to baselines
+        # rel,
+        res_list = []
+        print(len(id2relation), id2relation)
+        print(relation2id)
+        print(len(rel2gt_pred.keys()), rel2gt_pred.keys())
+        total_len, tot_auroc, tot_auprc, tot_ap, tot_f1 = 0, 0.0, 0.0, 0.0, 0.0
+        for k, v in rel2gt_pred.items():
+            print(id2relation[int(k)])
+            _len = v[0].shape[0]
+            total_len += _len
+            test_auroc, test_ap, test_auprc, test_f1 = metrics.roc_auc_score(v[0], v[1]), \
+                                                       metrics.average_precision_score(v[0], v[1]), \
+                                                       calc_aupr(v[0], v[1]), \
+                                                       metrics.f1_score(v[0], eval_threshold(v[0], v[1])[1])
+            tot_auroc += test_auroc * _len
+            tot_auprc += test_auprc * _len
+            tot_ap += test_ap * _len
+            tot_f1 += test_f1 * _len
+            res_list.append([int(k), test_auroc, test_auprc, test_ap, test_f1])
+
+        pd.DataFrame(res_list).to_csv(f'results/{result_file_name}_multi.csv',
+                                      header=['rel_name', 'auroc', 'auprc', 'ap', 'f1'])
+        with open(f'results/{result_file_name}', 'a+') as f:
+            f.write(
+                f'final,{params.dataset},'
+                f'{tot_auroc / total_len},'
+                f'{tot_auprc / total_len},'
+                f'{tot_ap / total_len},'
+                f'{tot_f1 / total_len}\n'
+            )

@@ -28,9 +28,9 @@ parser.add_argument("--emb_dim", type=int, default=128,
 parser.add_argument("--mode", type=str, choices=['hard_mix', 'soft_mix', 'two_pred'], default='two_pred',
                     help="predictor mode")
 parser.add_argument("--task", type=str, default='ddi', choices=['ddi', 'dta'])
-parser.add_argument('--n_epoch', type=int, default=600)
-parser.add_argument('--learning_rate', '-lr', type=float, default=0.001)
+parser.add_argument('--n_epoch', type=int, default=800)
+parser.add_argument('--learning_rate', '-lr', type=float, default=0.01)
 parser.add_argument('--alpha_loss', type=float, default=1.)
 parser.add_argument('--beta_loss', type=float, default=0.8)
-parser.add_argument('--gamma_loss', type=float, default=1.)
+parser.add_argument('--gamma_loss', type=float, default=0.01)
 # params.alpha_loss * BCEloss + params.beta_loss * KLloss + params.gamma_loss

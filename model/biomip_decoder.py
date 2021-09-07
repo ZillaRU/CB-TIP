@@ -24,7 +24,7 @@ class MultiInnerProductDecoder(nn.Module):
     # def forward(self, z, edge_index, edge_type, sigmoid=True):
         # value = (z[edge_index[0]] * z[edge_index[1]] * self.weight[edge_type]).sum(dim=1)
         # return torch.sigmoid(value) if sigmoid else value
-    def forward(self,graph, z, sigmoid=True, test=False):
+    def forward(self,graph, z, sigmoid=True):
         # if test: # return res of each type in dict
         # if isinstance(graph, DGLGraph):
         rel_types = graph.canonical_etypes[:-2]
