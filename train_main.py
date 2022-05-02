@@ -95,10 +95,10 @@ if __name__ == '__main__':
     params.aln_path = '/data/rzy/drugbank_prot/full_drugbank/aln'
     params.npy_path = '/data/rzy/drugbank_prot/full_drugbank/pconsc4'
 
-    if params.dataset == 'full':
+    if params.dataset == 'cb-db':
         params.small_mol_db_path = f'/data/rzy/drugbank_prot/{params.dataset}/smile_graph_db_{params.SMILES_featurizer}'
         params.macro_mol_db_path = f'/data/rzy/drugbank_prot/{params.dataset}/prot_graph_db'  # _{params.prot_featurizer}
-    elif params.dataset == 'deep':
+    elif params.dataset == 'c-db':
         params.small_mol_db_path = f'/data/rzy/deep/smile_graph_db_{params.SMILES_featurizer}'
         params.macro_mol_db_path = f'/data/rzy/deep/prot_graph_db'  # _{params.prot_featurizer}
     else:
