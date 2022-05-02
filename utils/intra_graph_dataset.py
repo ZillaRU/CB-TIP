@@ -1,3 +1,5 @@
+import struct
+
 import lmdb
 from torch.utils.data import Dataset
 
@@ -23,6 +25,10 @@ class IntraGraphDataset(Dataset):
 
     def get_nfeat_dim(self):
         with self.main_env.begin(db=self.db) as txn:
+            print(struct.unpack('f', txn.get('avg_molgraph_size'.encode())),'+-',
+                  struct.unpack('f', txn.get('std_molgraph_size'.encode())))
+            print(struct.unpack('f', txn.get('min_molgraph_size'.encode())),
+                  struct.unpack('f', txn.get('max_molgraph_size'.encode())))
             return int.from_bytes(txn.get('node_feat_dim'.encode('ascii')), byteorder='little')
 
     def get_efeat_dim(self):

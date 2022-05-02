@@ -216,6 +216,153 @@ def dd_dt_tt_build_inter_graph_from_links(dataset, split, saved_relation2id=None
            drug_cnt, target_cnt, small_cnt
 
 
+def dd_build_inter_graph_from_links(dataset, split, saved_relation2id=None):
+    _pre = '../baselines/data/'
+    files = {
+        'train': {
+            'pos': f'{_pre}{dataset}{split}/train_pos.txt',
+            'neg': f'{_pre}{dataset}{split}/train_neg.txt'
+        },
+        'valid': {
+            'pos': f'{_pre}{dataset}{split}/valid_pos.txt',
+            'neg': f'{_pre}{dataset}{split}/train_neg.txt'
+        },
+        'test': {
+            'pos': f'{_pre}{dataset}{split}/test_pos.txt',
+            'neg': f'{_pre}{dataset}{split}/test_neg.txt'
+        }
+    }
+
+    drug2id, bio2id = {}, {}
+
+    biodrug_set = set(pd.read_csv(f'data/{dataset}/biotech_seqs.csv', header=None).iloc[:, 0]) \
+        if dataset == 'full' else set()
+
+    # dd_types
+    # ub,vd,vb
+    type_dict = {
+        (True, True): ('macro', 'macro'),
+        (False, False): ('small', 'small'),
+        (False, True): ('small', 'macro'),
+        (True, False): ('macro', 'small')
+    }
+
+    relation2id = {} if not saved_relation2id else None
+
+    small_cnt, bio_cnt = 0, 0
+    rel = 0
+    triplets = {}
+    dd_triplets = {}
+
+    # all triplets are DDIs
+    for file_type, file_paths in files.items():  # train/valid/test, pos/neg
+        triplets[file_type] = {}
+        dd_triplets[file_type] = {}
+        for y, path in file_paths.items():  # pos/neg, path
+            dd_data = {}
+            dd_data[('small', 'small')] = []
+            dd_data[('small', 'macro')] = []
+            dd_data[('macro', 'small')] = []
+            dd_data[('macro', 'macro')] = []
+            with open(path) as f:
+                file_data = [line.split(',') for line in f.read().split('\n')[:-1]]
+            for u, r, v in file_data:
+                u_is_bio, v_is_bio = u in biodrug_set, v in biodrug_set
+                if u_is_bio:
+                    if u not in bio2id:
+                        uid = bio2id[u] = bio_cnt
+                        bio_cnt += 1
+                    else:
+                        uid = bio2id[u]
+                else:
+                    if u not in drug2id:
+                        uid = drug2id[u] = small_cnt
+                        small_cnt += 1
+                    else:
+                        uid = drug2id[u]
+                if v_is_bio:
+                    if v not in bio2id:
+                        vid = bio2id[v] = bio_cnt
+                        bio_cnt += 1
+                    else:
+                        vid = bio2id[v]
+                else:
+                    if v not in drug2id:
+                        vid = drug2id[v] = small_cnt
+                        small_cnt += 1
+                    else:
+                        vid = drug2id[v]
+                if not saved_relation2id and r not in relation2id:
+                    relation2id[r] = rel
+                    rel += 1
+                # Save the triplets corresponding to only the known relations
+                if r in relation2id:
+                    temp = [uid, vid, relation2id[r]]
+                    dd_data[type_dict[(u_is_bio, v_is_bio)]].append(temp)
+            dd_triplets[file_type][y] = dd_data
+
+    for _set, label_tris in dd_triplets.items():
+        # print(_set, label_tris.keys())
+        for _label, dd_data in label_tris.items():
+            # print(_set, _label, dd_dt_tt_data.keys())
+            temp_list = dd_data[('small', 'macro')]
+            dd_data[('small', 'macro')] = [
+                [u, v + small_cnt, r] for u, v, r in temp_list
+            ]
+            temp_list = dd_data[('macro', 'small')]
+            dd_data[('macro', 'small')] = [
+                [u + small_cnt, v, r] for u, v, r in temp_list
+            ]
+            temp_list = dd_data[('macro', 'macro')]
+            dd_data[('macro', 'macro')] = [
+                [u + small_cnt, v + small_cnt, r] for u, v, r in temp_list
+            ]
+            temp_dict = {}
+            temp_dict['dd'] = dd_data[('small', 'small')] + dd_data[('small', 'macro')] \
+                              + dd_data[('macro', 'small')] + dd_data[('macro', 'macro')]
+            triplets[_set][_label] = np.array(temp_dict['dd'], dtype=np.int16)
+            dd_triplets[_set][_label] = temp_dict
+    for k, v in bio2id.items():
+        drug2id[k] = v + small_cnt
+    id2drug = {v: k for k, v in drug2id.items()}
+    id2relation = {v: k for k, v in relation2id.items()}
+    drug_cnt = small_cnt + bio_cnt
+    _dict = {}
+    for _set in ['pos', 'neg']:
+        _dict[_set] = {}
+        for i in range(len(relation2id)):
+            idx = np.argwhere(triplets['train'][_set][:, 2] == i)
+            rel = id2relation[i]
+            rel_tuple = ("drug", rel, "drug")
+            shape = (drug_cnt, drug_cnt)
+            _dict[_set][rel_tuple] = csc_matrix(
+                (
+                    np.ones(len(idx), dtype=np.uint8),
+                    (
+                        triplets['train'][_set][:, 0][idx].squeeze(1),
+                        triplets['train'][_set][:, 1][idx].squeeze(1)
+                    )
+                ), shape=shape)
+    print(f'drug_cnt: {drug_cnt}, (including {small_cnt} small ones)')
+    return _dict['pos'], _dict['neg'], triplets, dd_triplets, \
+           drug2id, relation2id, \
+           id2drug, id2relation, \
+           drug_cnt, small_cnt
+
+
+def ddssp_multigraph_to_dgl(drug_cnt, adjs, relation2id):
+    adjs = {k: v.tocoo() for k, v in adjs.items()}
+    graph_dict = {}
+    for k, v in adjs.items():
+        graph_dict[k] = (torch.from_numpy(v.row),
+                         torch.from_numpy(v.col))
+    g_dgl = dgl.heterograph(graph_dict,
+                            num_nodes_dict={
+                                'drug': drug_cnt
+                            })
+    return g_dgl
+
+
 def ssp_multigraph_to_dgl(drug_cnt, target_cnt, adjs, relation2id):
     adjs = {k: v.tocoo() for k, v in adjs.items()}
     # g_dgl = dgl.heterograph({
@@ -250,8 +397,7 @@ def ssp_multigraph_to_dgl(drug_cnt, target_cnt, adjs, relation2id):
 
 def build_valid_test_graph(drug_cnt, edges, relation2id, id2relation):
     adjs = {}
-
-    for i in range(len(relation2id)-2):
+    for i in range(len(relation2id) - 2):
         idx = np.argwhere(edges[:, 2] == i)
         rel = id2relation[i]
         rel_tuple = ("drug", rel, "drug")
@@ -267,22 +413,8 @@ def build_valid_test_graph(drug_cnt, edges, relation2id, id2relation):
             ), shape=shape).tocoo()
     graph_dict = {}
     for k, v in adjs.items():
-        # print(k, v)
-        if k[0] != k[2]:
-            graph_dict[k] = (torch.from_numpy(v.row), torch.from_numpy(v.col))
-            graph_dict[(k[2], f"~{k[1]}", k[0])] = (torch.from_numpy(v.col), torch.from_numpy(v.row))
-            relation2id[f"~{k[1]}"] = len(relation2id)
-        else:
-            # graph_dict[k] = (torch.from_numpy(np.hstack((v.row, v.col))),
-            #                  torch.from_numpy(np.hstack((v.col, v.row))))
-            graph_dict[k] = (torch.from_numpy(v.row),
-                             torch.from_numpy(v.col))
-        # gdgl = dgl.heterograph({
-        #     k: (torch.from_numpy(np.hstack((v.row, v.col))),
-        #         torch.from_numpy(np.hstack((v.col, v.row))))
-        #     for k, v in adjs.items()
-        # })
-        # CAUTION: must assign the num_nodes_dict explicitly, since there are isolated molecules in pos_train_graph
+        graph_dict[k] = (torch.from_numpy(v.row),
+                         torch.from_numpy(v.col))
     return dgl.heterograph(graph_dict,
                            num_nodes_dict={
                                'drug': drug_cnt

@@ -92,7 +92,7 @@ class AttentiveFPReadout(nn.Module):
     dropout : float
         The probability for performing dropout. Default to 0.
     """
-    def __init__(self, feat_size, num_timesteps=2, dropout=0.):
+    def __init__(self, feat_size, num_timesteps=1, dropout=0.1): #2 .0
         super(AttentiveFPReadout, self).__init__()
 
         self.readouts = nn.ModuleList()
@@ -133,8 +133,8 @@ class AttentiveFPReadout(nn.Module):
                 node_weights.append(node_weights_t)
             else:
                 g_feats = readout(g, node_feats, g_feats)
-
         if get_node_weight:
             return g_feats, node_weights
         else:
+            # print('MOL_G_feats', g_feats)
             return g_feats

@@ -40,7 +40,7 @@ def pconsc4Prediction(dataset):
 
 def sudocmd(cmd):
     print(cmd)
-    rzy_pass = '123456'
+    rzy_pass = 'xxxxxx'
     os.system("echo %s|sudo -S %s " % (rzy_pass, cmd))
 
 

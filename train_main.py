@@ -5,7 +5,6 @@ import time
 import pandas as pd
 import torch
 from sklearn import metrics
-
 from model import build_optimizer
 from model.customized_loss import select_loss_function
 from model.model_config import initialize_BioMIP
@@ -15,27 +14,24 @@ from utils.generate_intra_graph_db import generate_small_mol_graph_datasets, gen
 from utils.hete_data_utils import ssp_multigraph_to_dgl, \
     dd_dt_tt_build_inter_graph_from_links, build_valid_test_graph
 from utils.intra_graph_dataset import IntraGraphDataset
-# training fuction on each epoch
 from utils.utils import calc_aupr
 
 
-def train(encoder, decoder_intra, decoder_inter, dgi_model,
+def train(encoder, decoder_intra, decoder_inter, ff_mi,
           opt, loss_fn: dict,
           mol_graphs,
-          train_pos_graph, train_neg_graph):
+          train_pos_graph, train_neg_graph,
+          loss_save_file):
     encoder.train()
     decoder_intra.train()
     decoder_inter.train()
-    dgi_model.train()
+    ff_mi.train()
     opt.zero_grad()
-    # emb_intra: dict, keys: "small", "bio", "target"
-    # emb_inter: dict, keys: "drug", "target"
+
     emb_intra, emb_inter = encoder(mol_graphs,
                                    train_pos_graph)
-    # print("emb_intra", emb_intra)
-    # print("emb_inter", emb_inter)
-    dgi_loss = dgi_model(emb_intra, emb_inter,
-                         train_pos_graph, train_neg_graph)
+    dgi_loss = ff_mi(emb_intra, emb_inter,
+                     train_pos_graph, train_neg_graph)
 
     # decoder:  return dict
     if emb_intra['bio'] is not None:
@@ -46,78 +42,38 @@ def train(encoder, decoder_intra, decoder_inter, dgi_model,
     emb_inter = emb_inter['drug']
     pos_scores_intra = torch.hstack(tuple(decoder_intra(train_pos_graph, emb_intra).values()))
     neg_scores_intra = torch.hstack(tuple(decoder_intra(train_neg_graph, emb_intra).values()))
-    labels = torch.cat([torch.ones(pos_scores_intra.shape[0]), torch.zeros(neg_scores_intra.shape[0])])  # .numpy()
+    labels = torch.cat(
+        [torch.ones(pos_scores_intra.shape[0]), torch.zeros(neg_scores_intra.shape[0])]).cuda()  # .numpy()
     pos_scores_inter = torch.hstack(tuple(decoder_inter(train_pos_graph, emb_inter).values()))
     neg_scores_inter = torch.hstack(tuple(decoder_inter(train_neg_graph, emb_inter).values()))
     score_inter, score_intra = torch.cat([pos_scores_inter, neg_scores_inter]), torch.cat(
         [pos_scores_intra, neg_scores_intra])
-    # print(score_inter, score_intra, labels)
     BCEloss = torch.mean(loss_fn['ERROR'](score_inter, labels))
-    # BCEloss += torch.mean(loss_fn['ERROR'](score_intra, labels))
+    BCEloss += params.alpha_loss * torch.mean(loss_fn['ERROR'](score_intra, labels))
     KLloss = torch.mean(loss_fn['DIFF'](score_intra, score_inter))
-    # KLloss = torch.mean(loss_fn['DIFF'](score_intra, torch.log(score_inter)))
 
-    curr_loss = params.alpha_loss * BCEloss + params.beta_loss * KLloss + params.gamma_loss * dgi_loss
+    curr_loss = BCEloss + params.beta_loss * KLloss + params.gamma_loss * dgi_loss
     curr_loss.backward()
     print("back:", BCEloss.item(), KLloss.item(), dgi_loss.item())
     opt.step()
     print('Train epoch: {} Loss: {:.6f}'.format(epoch, curr_loss.item()))
+    with open(f'results/{loss_save_file}', 'a+') as f:
+        f.write(f'{BCEloss.item()},{KLloss.item()},{dgi_loss.item()},{curr_loss.item()}\n')
     return emb_intra, emb_inter
-
-
-# # training fuction on each epoch
-# def train_both(encoder, decoder, opt, loss_fn: dict, mol_graphs, train_pos_graph, train_neg_graph, pred_rels):
-#     encoder.train()
-#     decoder.train()
-#     opt.zero_grad()
-#     emb_intra, emb_inter = encoder(mol_graphs,
-#                                    train_pos_graph)
-#     pos_score_intra, pos_score_inter = decoder(train_pos_graph, emb_intra, emb_inter,
-#                                                pred_rels=pred_rels)
-#     neg_score_intra, neg_score_inter = decoder(train_neg_graph, emb_intra, emb_inter,
-#                                                pred_rels=pred_rels)
-#     print(pos_score_intra)
-#     print(neg_score_intra)
-#     print(pos_score_inter)
-#     print(neg_score_inter)
-#     labels = torch.cat([torch.ones(pos_score_inter.shape[0]), torch.zeros(neg_score_inter.shape[0])]).numpy()
-#     intra_scores = torch.cat([pos_score_intra, neg_score_intra]).numpy()
-#     inter_scores = torch.cat([pos_score_inter, neg_score_inter]).numpy()
-#
-#     # encoder:
-#     # - GNN for small molecules (attentive FP or ...)
-#     # - CNN/RNN/GNN for macro molecules
-#
-#     # decoder:
-#     # - Decagon(DistMulti/Bilinear/Dot) multi-relational
-#
-#     # multi-view alignment straightforward extension for heterogeneous graphs?
-#     # - MIRACLE-DGIloss Deep Graph Infomax (mutual information maximization) https://github.com/dmlc/dgl/blob/master/examples/pytorch/dgi/dgi.py
-#     # - DEAL(Dual Encoder with ALignment (mutual information maximization)
-#     #   the idea of loose-alignment is similar with constrasive learning applied in MIRACLE
-#
-#     # handling missing intra-/inter-view): DEAL
-#
-#     loss = loss_fn['BCE'](labels, scores, )
-#     if 'ERROR' in loss_fn:
-#         loss += loss_fn['DIFF'](emb_intra)
-#     # loss = loss_fn(output, data.y.view(-1, 1).float().to(device)).mean()
-#     loss.backward()
-#     opt.step()
-#     print('Train epoch: {} Loss: {:.6f}'.format(epoch, loss.item()))
-#     return emb_intra, emb_inter
 
 
 def predicting(model_intra, model_inter,
                intra_feats, inter_feats,
                pos_g, neg_g,
                multi_res=False):
+    model_intra.eval()
+    model_inter.eval()
     if multi_res:
         pos_pred, neg_pred = model_inter(pos_g, inter_feats), model_inter(neg_g, inter_feats)
         res = {}
         for k in pos_g.canonical_etypes[:-2]:
-            res[k] = (torch.cat([torch.ones(pos_pred[k].shape[0]), torch.zeros(neg_pred[k].shape[0])]).numpy(),
-                      torch.cat([pos_pred[k], neg_pred[k]]).detach().numpy())
+            res[k] = (torch.cat([torch.ones(pos_pred[k].shape[0]), torch.zeros(neg_pred[k].shape[0])]).cpu().numpy(),
+                      torch.cat([pos_pred[k], neg_pred[k]]).detach().cpu().numpy())
         return res
 
     pos_score1 = torch.hstack(tuple(model_intra(pos_g, intra_feats).values()))
@@ -125,15 +81,13 @@ def predicting(model_intra, model_inter,
     pos_score2 = torch.hstack(tuple(model_inter(pos_g, inter_feats).values()))
     neg_score2 = torch.hstack(tuple(model_inter(neg_g, inter_feats).values()))
     labels = torch.cat([torch.ones(pos_score1.shape[0]), torch.zeros(neg_score1.shape[0])]).numpy()
-    return labels, torch.cat([pos_score1, neg_score1]).detach().numpy(), \
-           torch.cat([pos_score2, neg_score2]).detach().numpy()
+    return labels, torch.cat([pos_score1, neg_score1]).detach().cpu().numpy(), \
+           torch.cat([pos_score2, neg_score2]).detach().cpu().numpy()
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     params = parser.parse_args()
-    # initialize_experiment(params)
-    # save featurized intra-view graphs
     print(params)
 
     time_str = time.strftime('%m-%d_%H_%M', time.localtime(time.time()))
@@ -149,10 +103,6 @@ if __name__ == '__main__':
         params.macro_mol_db_path = f'/data/rzy/deep/prot_graph_db'  # _{params.prot_featurizer}
     else:
         raise NotImplementedError
-
-    # macro_mol_list = pd.read_csv(f'data/{params.dataset}/macro_seqs.csv', header=None, names=['id', '_'])[
-    #     'id'].tolist()
-    # macro_mol_list = [str(i) for i in macro_mol_list]  # assure mol_id is a string
 
     print('small molecule db_path:', params.small_mol_db_path)
     print('macro molecule db_path:', params.macro_mol_db_path)
@@ -172,13 +122,6 @@ if __name__ == '__main__':
     params.aa_node_insize = macro_mol_graphs.get_nfeat_dim()
     params.aa_edge_insize = macro_mol_graphs.get_efeat_dim()
 
-    # edge_type2decoder = {
-    #     'tt': 'dedicom',
-    #     'dt': 'bilinear',
-    #     '~dt': 'bilinear',
-    #     'dd': 'dedicom'
-    # }
-
     # load the inter-view graph
     pos_adj_dict, neg_adj_dict, \
     triplets, dd_dt_tt_triplets, \
@@ -188,6 +131,7 @@ if __name__ == '__main__':
         dataset=params.dataset,
         split=params.split
     )
+
     # init pos/neg inter-graph
     train_pos_graph, train_neg_graph = ssp_multigraph_to_dgl(
         drug_cnt, target_cnt,
@@ -199,9 +143,6 @@ if __name__ == '__main__':
         relation2id=relation2id
     )
 
-    # print("train positive graph: ", train_pos_graph[0])
-    # print("train negative graph: ", train_neg_graph[0])
-
     params.rel2id = train_pos_graph[1]
     params.num_rels = len(params.rel2id)
     params.id2rel = {
@@ -212,13 +153,14 @@ if __name__ == '__main__':
 
     if not params.disable_cuda and torch.cuda.is_available():
         params.device = torch.device('cuda:%d' % params.gpu)
+        train_pos_graph = train_pos_graph.to(params.device)
+        train_neg_graph = train_neg_graph.to(params.device)
     else:
         params.device = torch.device('cpu')
 
     params.intra_enc1 = 'afp'
     params.intra_enc2 = 'afp'  # 'rnn'
     params.loss = 'focal'
-    params.task = 'dt'  # options: 'dd', 'all'
     params.is_test = False
 
     small_intra_g_list = [small_mol_graphs[id2drug[i]][1] for i in range(small_cnt)]
@@ -233,59 +175,57 @@ if __name__ == '__main__':
         mol_graphs['bio'] = [macro_mol_graphs[id2drug[i]][2] for i in
                              range(small_cnt, drug_cnt)]  # d_id = small_cnt+idx
 
-    model_file_name = f'{time_str}model_{params.intra_enc1}_{params.intra_enc2}_{params.dataset}{params.split}_{params.loss}.model'
-    result_file_name = f'{time_str}_result_{params.intra_enc1}_{params.intra_enc2}_{params.dataset}{params.split}_{params.loss}.csv'
-
+    model_file_name = f'{time_str}model_{params.dataset}{params.split}.model' \
+        if params.model_filename is None else params.model_filename
+    result_file_name = f'{time_str}result_{params.dataset}{params.split}.csv'
+    encoder, decoder_intra, decoder_inter, ff_contra_net = initialize_BioMIP(params)
+    tgp, tgn = build_valid_test_graph(
+        drug_cnt,
+        edges=triplets['test']['pos'],
+        relation2id=relation2id,
+        id2relation=id2relation
+    ).to(params.device), build_valid_test_graph(
+        drug_cnt,
+        edges=triplets['test']['neg'],
+        relation2id=relation2id,
+        id2relation=id2relation
+    ).to(params.device)
     if not params.is_test:
-        # init model, opt, loss
-        encoder, decoder_intra, decoder_inter, dgi_model = initialize_BioMIP(params)
-        opt = build_optimizer(encoder, decoder_intra, decoder_inter, dgi_model, params)
+        # init opt, loss
+        opt = build_optimizer(encoder, decoder_intra, decoder_inter, ff_contra_net, params)
         loss_fn = select_loss_function(params.loss)  # a loss dict 'loss name': (weight, loss_fuction)
         best_auc = 0.
         best_epoch = -1
-        # print(id2relation, relation2id)
         vgp, vgn = build_valid_test_graph(
             drug_cnt,
             edges=triplets['valid']['pos'],
             relation2id=relation2id,
             id2relation=id2relation
-        ), build_valid_test_graph(
+        ).to(params.device), build_valid_test_graph(
             drug_cnt,
             edges=triplets['valid']['neg'],
             relation2id=relation2id,
             id2relation=id2relation
-        )
-        tgp, tgn = build_valid_test_graph(
-            drug_cnt,
-            edges=triplets['test']['pos'],
-            relation2id=relation2id,
-            id2relation=id2relation
-        ), build_valid_test_graph(
-            drug_cnt,
-            edges=triplets['test']['neg'],
-            relation2id=relation2id,
-            id2relation=id2relation
-        )
-        for epoch in range(1, params.n_epoch + 1):
-            emb_intra, emb_inter = train(encoder, decoder_intra, decoder_inter, dgi_model,
+        ).to(params.device)
+        cnt_trival = 0
+        for epoch in range(1, params.max_epoch + 1):
+            emb_intra, emb_inter = train(encoder, decoder_intra, decoder_inter, ff_contra_net,
                                          opt, loss_fn,
                                          mol_graphs,
-                                         train_pos_graph, train_neg_graph)
+                                         train_pos_graph, train_neg_graph,
+                                         f'loss_{result_file_name}')
             print('predicting for valid data')
 
             val_G, val_P1, val_P2 = predicting(decoder_intra, decoder_inter,
                                                emb_intra, emb_inter,
                                                vgp, vgn)
             val1 = metrics.roc_auc_score(val_G, val_P1)
-            # print('-----',val_P2)
             val2 = metrics.roc_auc_score(val_G, val_P2)
             print(f'valid AUROC: ', val1, val2)
             if val2 > best_auc:
+                cnt_trival = 0
                 best_auc = val2
                 best_epoch = epoch
-                torch.save(encoder.state_dict(), f'trained_models/encoder_{model_file_name})')
-                torch.save(decoder_inter.state_dict(), f'trained_models/interdec_{model_file_name})')
-                torch.save(decoder_intra.state_dict(), f'trained_models/interdec_{model_file_name})')
                 print(f'AUROC improved at epoch {best_epoch}')
                 print(
                     f'val AUROC {val2}, AP {metrics.average_precision_score(val_G, val_P2)} F1: {metrics.f1_score(val_G, eval_threshold(val_G, val_P2)[1])}')
@@ -304,45 +244,62 @@ if __name__ == '__main__':
                         f.write('epoch,auroc,auprc,ap,f1\n')
                 with open(f'results/{result_file_name}', 'a+') as f:
                     f.write(f'{epoch},{test_auroc},{test_auprc},{test_ap},{test_f1}\n')
+            else:
+                if epoch > params.min_epoch:
+                    cnt_trival += 1
+                if cnt_trival >= params.stop_thresh:
+                    print('Stop training due to more than 20 epochs with no improvement')
+                    break
+    encoder.load_state_dict(torch.load(f'trained_models/encoder_{model_file_name}'))
+    decoder_inter.load_state_dict(torch.load(f'trained_models/interdec_{model_file_name}'))
 
-        # calculate and sace the final test results
-        encoder.load_state_dict(torch.load(f'trained_models/encoder_{model_file_name})'))
-        decoder_inter.load_state_dict(torch.load(f'trained_models/interdec_{model_file_name})'))
-        decoder_intra.load_state_dict(torch.load(f'trained_models/interdec_{model_file_name})'))
-        emb_intra, emb_inter = encoder(mol_graphs, train_pos_graph)
-        rel2gt_pred = predicting(decoder_intra, decoder_inter,
-                                 emb_intra, emb_inter,
-                                 tgp, tgn,
-                                 multi_res=True)
+    decoder_intra.load_state_dict(torch.load(f'trained_models/intradec_{model_file_name}'))
+    emb_intra, emb_inter = encoder(mol_graphs, train_pos_graph)
 
-        # parse the rel_id to raw relation type for comparison to baselines
-        # rel,
-        res_list = []
-        print(len(id2relation), id2relation)
-        print(relation2id)
-        print(len(rel2gt_pred.keys()), rel2gt_pred.keys())
-        total_len, tot_auroc, tot_auprc, tot_ap, tot_f1 = 0, 0.0, 0.0, 0.0, 0.0
-        for k, v in rel2gt_pred.items():
-            print(id2relation[int(k)])
-            _len = v[0].shape[0]
-            total_len += _len
+    if emb_intra['bio'] is not None:
+        # np.savetxt(f'emb_vis/{params.dataset}_intra_bio_for_visual.csv', emb_intra['bio'].detach().cpu().numpy(), delimiter=',')
+        emb_intra = torch.cat((emb_intra['small'], emb_intra['bio']), dim=0)
+
+    else:
+        emb_intra = emb_intra['small']
+
+    emb_inter = emb_inter['drug']
+    rel2gt_pred = predicting(decoder_intra, decoder_inter,
+                             emb_intra, emb_inter,
+                             tgp, tgn,
+                             multi_res=True)
+    res_list = []
+
+    print(len(rel2gt_pred.keys()), rel2gt_pred.keys())  # 62
+    total_len, tot_auroc, tot_auprc, tot_ap, tot_f1 = 0, 0.0, 0.0, 0.0, 0.0
+    for k, v in rel2gt_pred.items():
+        _len = v[0].shape[0]
+        if _len == 0:
+            res_list.append([int(k[1]), 0, 0, 0, 0, 0])
+            continue
+        try:
             test_auroc, test_ap, test_auprc, test_f1 = metrics.roc_auc_score(v[0], v[1]), \
                                                        metrics.average_precision_score(v[0], v[1]), \
                                                        calc_aupr(v[0], v[1]), \
                                                        metrics.f1_score(v[0], eval_threshold(v[0], v[1])[1])
-            tot_auroc += test_auroc * _len
-            tot_auprc += test_auprc * _len
-            tot_ap += test_ap * _len
-            tot_f1 += test_f1 * _len
-            res_list.append([int(k), test_auroc, test_auprc, test_ap, test_f1])
+            total_len += _len
+        except ValueError:
+            res_list.append([int(k[1]),0, 0, 0, 0, 0])
+            continue
+        tot_auroc += test_auroc * _len
+        tot_auprc += test_auprc * _len
+        tot_ap += test_ap * _len
+        tot_f1 += test_f1 * _len
+        res_list.append([int(k[1]), _len, test_auroc, test_auprc, test_ap, test_f1])
+    pd.DataFrame(res_list).to_csv(f'results/{result_file_name}_multi.csv', index=False,
+                                  header=['rel_name', 'test_len', 'auroc', 'auprc', 'ap', 'f1'])
+    with open(f'results/{result_file_name}', 'a+') as f:
+        f.write(
+            f'final,{params.dataset},'
+            f'{tot_auroc / total_len},'
+            f'{tot_auprc / total_len},'
+            f'{tot_ap / total_len},'
+            f'{tot_f1 / total_len}\n'
+        )
 
-        pd.DataFrame(res_list).to_csv(f'results/{result_file_name}_multi.csv',
-                                      header=['rel_name', 'auroc', 'auprc', 'ap', 'f1'])
-        with open(f'results/{result_file_name}', 'a+') as f:
-            f.write(
-                f'final,{params.dataset},'
-                f'{tot_auroc / total_len},'
-                f'{tot_auprc / total_len},'
-                f'{tot_ap / total_len},'
-                f'{tot_f1 / total_len}\n'
-            )
+# python train_main.py -d deep -sp 415-2 --gpu 2 --beta_loss 0.3 --gamma_loss 0.001 --alpha_loss 1 -lr 0.001 --max_epoch 500

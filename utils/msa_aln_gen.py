@@ -58,7 +58,7 @@ def reformat(bin_path, input_dir, output_dir):
 
 def sudocmd(cmd):
     print(cmd)
-    rzy_pass = '123456'
+    rzy_pass = 'xxxxxx'
     os.system("echo %s|sudo -S %s " % (rzy_pass, cmd))
 
 

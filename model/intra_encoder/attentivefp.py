@@ -330,14 +330,8 @@ class AttentiveFPGNN(nn.Module):
 
         self.init_context = GetContext(node_feat_size, edge_feat_size, graph_feat_size, dropout)
         self.gnn_layers = nn.ModuleList()
-        for _ in range(num_layers - 1):
+        for _ in range(num_layers):
             self.gnn_layers.append(GNNLayer(graph_feat_size, graph_feat_size, dropout))
-
-    def reset_parameters(self):
-        """Reinitialize model parameters."""
-        self.init_context.reset_parameters()
-        for gnn in self.gnn_layers:
-            gnn.reset_parameters()
 
     def forward(self, g, node_feats, edge_feats):
         """Performs message passing and updates node representations.

@@ -3,8 +3,6 @@ import math
 import torch
 import torch.nn.functional as F
 
-from .misc import log_sum_exp
-
 
 def raise_measure_error(measure):
     supported_measures = ['GAN', 'JSD', 'X2', 'KL', 'RKL', 'DV', 'H2', 'W1']
@@ -67,3 +65,18 @@ def get_negative_expectation(q_samples, measure, average=True):
         return Eq.mean()
     else:
         return Eq
+
+def log_sum_exp(x, axis=None):
+    """Log sum exp function
+
+    Args:
+        x: Input.
+        axis: Axis over which to perform sum.
+
+    Returns:
+        torch.Tensor: log sum exp
+
+    """
+    x_max = torch.max(x, axis)[0]
+    y = torch.log((torch.exp(x - x_max)).sum(axis)) + x_max
+    return y

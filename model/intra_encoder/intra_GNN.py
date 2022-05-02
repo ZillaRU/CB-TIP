@@ -24,12 +24,6 @@ class Intra_AttentiveFP(nn.Module):
         #     nn.Linear(graph_feat_size, n_tasks)
         # )
 
-    def reset_parameters(self):
-        """Reinitialize model parameters."""
-        self.init_context.reset_parameters()
-        for gnn in self.gnn_layers:
-            gnn.reset_parameters()
-
     def forward(self, g, node_feats, edge_feats):
         """Performs message passing and updates node representations.
 
@@ -50,11 +44,3 @@ class Intra_AttentiveFP(nn.Module):
         node_feats = self.gnn(g, node_feats, edge_feats)
         g_feats = self.readout(g, node_feats)
         return g_feats
-
-
-class Intra_GAT(nn.Module):
-    pass
-
-
-class Intra_GCN(nn.Module):
-    pass

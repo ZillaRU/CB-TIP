@@ -21,16 +21,10 @@ from utils.mol_utils import PSSM_calculation, pro_res_table, pro_res_aliphatic_t
     one_of_k_encoding
 
 
-# , PAGTNAtomFeaturizer, PAGTNEdgeFeaturizer
-
-
-def build_molecule_graph(args_, graph_mode='bigraph', featurizer='base'):
+def build_molecule_graph(args_, graph_mode='bigraph', featurizer='afp'):
     """Construct graphs from SMILES and featurize them
     options:
     BaseAtomFeaturizer
-    CanonicalAtomFeaturizer     CanonicalBondFeaturizer
-    PretrainAtomFeaturizer      WeaveEdgeFeaturizer
-    WeaveAtomFeaturizer         PretrainBondFeaturizer
     AttentiveFPAtomFeaturizer   AttentiveFPBondFeaturizer
 
     Returns
@@ -44,13 +38,13 @@ def build_molecule_graph(args_, graph_mode='bigraph', featurizer='base'):
     mol = chem.MolFromSmiles(smiles)
     if graph_mode == 'bigraph' and featurizer == 'base':
         g = mol_to_bigraph(mol,
-                           add_self_loop=True,
+                           add_self_loop=False,
                            node_featurizer=PretrainAtomFeaturizer(),
                            edge_featurizer=PretrainBondFeaturizer(),
                            canonical_atom_order=False)
     elif graph_mode == 'bigraph' and featurizer == 'afp':  # Attentive FP
         g = mol_to_bigraph(mol,
-                           add_self_loop=True,
+                           add_self_loop=False,
                            node_featurizer=AttentiveFPAtomFeaturizer(atom_data_field='hv'),
                            edge_featurizer=AttentiveFPBondFeaturizer(bond_data_field='he')
                            )
@@ -78,7 +72,7 @@ def build_molecule_graph(args_, graph_mode='bigraph', featurizer='base'):
             'he': lambda bond: [0 for _ in range(10)]
         })
         g = mol_to_bigraph(mol,
-                           add_self_loop=True,
+                           add_self_loop=False,
                            node_featurizer=atom_featurizer,
                            edge_featurizer=bond_featurizer
                            )
@@ -88,7 +82,11 @@ def build_molecule_graph(args_, graph_mode='bigraph', featurizer='base'):
     _tp = [torch.as_tensor(g.ndata[k].view(n_node, -1), dtype=torch.float32) for k in g.node_attr_schemes().keys()]
     g.ndata['nfeats'] = torch.cat(tuple(_tp), 1)
     _tp = [torch.as_tensor(g.edata[k].view(n_edge, -1), dtype=torch.float32) for k in g.edge_attr_schemes().keys()]
-    g.edata['efeats'] = torch.cat(tuple(_tp), 1)
+
+    if n_edge == 0:
+        print(mol_id, smiles, g)
+    else:
+        g.edata['efeats'] = torch.cat(tuple(_tp), 1)
 
     datum = {
         # 'mol_id': mol_id,
@@ -196,7 +194,7 @@ def generate_small_mol_graph_datasets(params):
     temp_g = g_datum['mol_graph']
     node_feat_dim = temp_g.ndata['nfeats'].shape[1]
     edge_feat_dim = temp_g.edata['efeats'].shape[1]
-    logging.info(f'node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
+    logging.info(f'small molecule: node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
 
     for [_id, _val] in seq_list:
         idx, datum = build_molecule_graph((_id, _val))
@@ -241,7 +239,7 @@ def generate_macro_mol_graph_datasets(params):
     temp_g = g_datum['mol_graph']
     node_feat_dim = temp_g.ndata['nfeats'].shape[1]
     edge_feat_dim = temp_g.edata['efeats'].shape[1]
-    logging.info(f'node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
+    logging.info(f'macro molecule: node_feat_dim = {node_feat_dim}, edge_feat_dim = {edge_feat_dim}')
 
     for _id, _val in seq_list:
         idx, datum = build_seq_to_graph((_id, _val))

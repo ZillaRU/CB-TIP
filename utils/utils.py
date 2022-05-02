@@ -1,22 +1,13 @@
-import logging
 import math
 import os
 from argparse import Namespace
-from typing import Callable, List, Tuple, Union
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
 from sklearn import metrics
 from sklearn.metrics import auc, mean_absolute_error, mean_squared_error, precision_recall_curve, r2_score, \
     roc_auc_score, log_loss, accuracy_score
-from torch.optim import Adam, Optimizer
-# from torch.optim.lr_scheduler import _LRScheduler
-
-# from model.nn_utils import NoamLR
-from utils.scaler import StandardScaler
-
-
-# from sklearn.externals import joblib
 
 
 def makedirs(path: str, isfile: bool = False):
@@ -33,24 +24,6 @@ def makedirs(path: str, isfile: bool = False):
         path = os.path.dirname(path)
     if path != '':
         os.makedirs(path, exist_ok=True)
-
-
-def load_scalers(path: str) -> Tuple[StandardScaler, StandardScaler]:
-    """
-    Loads the scalers a model was trained with.
-
-    :param path: Path where model checkpoint is saved.
-    :return: A tuple with the data scaler and the features scaler.
-    """
-    state = torch.load(path, map_location=lambda storage, loc: storage)
-
-    scaler = StandardScaler(state['data_scaler']['means'],
-                            state['data_scaler']['stds']) if state['data_scaler'] is not None else None
-    features_scaler = StandardScaler(state['features_scaler']['means'],
-                                     state['features_scaler']['stds'],
-                                     replace_nan_token=0) if state['features_scaler'] is not None else None
-
-    return scaler, features_scaler
 
 
 def load_args(path: str) -> Namespace:
@@ -145,133 +118,6 @@ def accuracy(targets: List[int], preds: List[float], threshold: float = 0.5) -> 
         hard_preds = [1 if p > threshold else 0 for p in preds]  # binary prediction
     return accuracy_score(targets, hard_preds)
 
-
-def get_metric_func(metric: str) -> Callable[[Union[List[int], List[float]], List[float]], float]:
-    """
-    Gets the metric function corresponding to a given metric name.
-
-    :param metric: Metric name.
-    :return: A metric function which takes as arguments a list of targets and a list of predictions and returns.
-    """
-    if metric == 'auc':
-        return roc_auc_score
-
-    if metric == 'prc-auc':
-        return prc_auc
-
-    if metric == 'rmse':
-        return rmse
-
-    if metric == 'mse':
-        return mse
-
-    if metric == 'mae':
-        return mean_absolute_error
-
-    if metric == 'r2':
-        return r2_score
-
-    if metric == 'accuracy':
-        return accuracy
-
-    if metric == 'cross_entropy':
-        return log_loss
-
-    raise ValueError(f'Metric "{metric}" not supported.')
-
-
-def build_optimizer(model: nn.Module, args: Namespace) -> Optimizer:
-    """
-    Builds an Optimizer.
-
-    :param model: The model to optimize.
-    :param args: Arguments.
-    :return: An initialized Optimizer.
-    """
-    params = [{'params': model.parameters(), 'lr': args.init_lr, 'weight_decay': 0}]
-
-    return Adam(params)
-
-
-# def build_lr_scheduler(optimizer: Optimizer, args: Namespace, total_epochs: List[int] = None) -> _LRScheduler:
-#     """
-#     Builds a learning rate scheduler.
-#
-#     :param optimizer: The Optimizer whose learning rate will be scheduled.
-#     :param args: Arguments.
-#     :param total_epochs: The total number of epochs for which the model will be run.
-#     :return: An initialized learning rate scheduler.
-#     """
-#     # Learning rate scheduler
-#
-#     # select lr scheduler according to the option 'lr_scheduler'
-#     return NoamLR(
-#         optimizer=optimizer,
-#         warmup_epochs=[args.warmup_epochs],
-#         total_epochs=total_epochs or [args.epochs] * args.num_lrs,
-#         steps_per_epoch=args.train_data_size // args.batch_size,
-#         init_lr=[args.init_lr],
-#         max_lr=[args.max_lr],
-#         final_lr=[args.final_lr]
-#     )
-
-
-def create_logger(name: str, save_dir: str = None, quiet: bool = False) -> logging.Logger:
-    """
-    Creates a logger with a stream handler and two file handlers.
-
-    The stream handler prints to the screen depending on the value of `quiet`.
-    One file handler (verbose.log) saves all logs, the other (quiet.log) only saves important info.
-
-    :param name: The name of the logger.
-    :param save_dir: The directory in which to save the logs.
-    :param quiet: Whether the stream handler should be quiet (i.e. print only important info).
-    :return: The logger.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False
-
-    # Set logger depending on desired verbosity
-    ch = logging.StreamHandler()
-    if quiet:
-        ch.setLevel(logging.INFO)
-    else:
-        ch.setLevel(logging.DEBUG)
-    logger.addHandler(ch)
-
-    if save_dir is not None:
-        makedirs(save_dir)
-
-        fh_v = logging.FileHandler(os.path.join(save_dir, 'verbose.log'))
-        fh_v.setLevel(logging.DEBUG)
-        fh_q = logging.FileHandler(os.path.join(save_dir, 'quiet.log'))
-        fh_q.setLevel(logging.INFO)
-
-        logger.addHandler(fh_v)
-        logger.addHandler(fh_q)
-
-    return logger
-
-
-def get_available_pretrain_methods():
-    return ['mol2vec']
-
-
-def get_available_data_types():
-    return ['small']
-
-
-def gen_preds(edges_pos, edges_neg, adj_rec):
-    preds = []
-    for e in edges_pos:
-        preds.append(adj_rec[e[0], e[1]])
-
-    preds_neg = []
-    for e in edges_neg:
-        preds_neg.append(adj_rec[e[0], e[1]])
-
-    return preds, preds_neg
 
 def calc_aupr(label, prob):
     precision, recall, _thresholds = metrics.precision_recall_curve(label, prob)
