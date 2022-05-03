@@ -1,4 +1,4 @@
-# ChemBioTIP — *T*ype-aware *I*nteraction *P*rediction for both *Chem*ical drugs and *Bio*tech drugs.
+# ChemBioTIP — *T*ype-aware *I*nteraction *P*rediction for both *Chem*ical drugs and *Bio*tech drugs
 
 ## Overview
 ChemBioTIP is a graph-based multi-relational link prediction framework tailored for DDI prediction, which is useful for providing prescript tips to clinicians. See our paper(link: ) for details on the framework.
