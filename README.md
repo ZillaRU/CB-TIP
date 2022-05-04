@@ -14,7 +14,7 @@ To reproduce the results reported in our paper, there is no need to construct th
 We share the archives of LMDB files storing the built intra-view graphs (path: `data/DATASET_NAME/lmdb_files`).
 
 *If you want to run this code on your own dataset,
-1. Generate the residue contact maps for large molecules (please refer to Section 7.1).
+1. Generate the residue contact maps for large molecules (please refer to Section 7.1 and `utils/msa_aln_gen.py`).
 2. Organize your data as the form like `data/CB-DB/`.
 3. Construct intra-view graphs and save them into LMDB files with the code `utils/generate_intra_graph_db.py`.
 
