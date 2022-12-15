@@ -17,24 +17,27 @@ from utils.intra_graph_dataset import IntraGraphDataset
 from utils.utils import calc_aupr
 
 
-def train(encoder, decoder_intra, decoder_inter, ff_mi,
+def train(encoder, decoder_intra, decoder_inter, dgi_model,
           opt, loss_fn: dict,
           mol_graphs,
           train_pos_graph, train_neg_graph,
-          loss_save_file):
+          loss_save_file,
+          epo_no,
+          intra_pairs,
+          epo_num_with_fp=200):
+    # print(params.learning_rate)
     encoder.train()
     decoder_intra.train()
     decoder_inter.train()
-    ff_mi.train()
+    dgi_model.train()
     opt.zero_grad()
-
     emb_intra, emb_inter = encoder(mol_graphs,
                                    train_pos_graph)
-    dgi_loss = ff_mi(emb_intra, emb_inter,
-                     train_pos_graph, train_neg_graph)
-
-    # decoder:  return dict
+    dgi_loss = dgi_model(emb_intra, emb_inter,
+                         train_pos_graph, train_neg_graph)
+    emb_intra_prot = emb_intra['target']
     if emb_intra['bio'] is not None:
+        emb_intra_prot = torch.cat((emb_intra['target'], emb_intra['bio']), dim=0)
         emb_intra = torch.cat((emb_intra['small'], emb_intra['bio']), dim=0)
     else:
         emb_intra = emb_intra['small']
@@ -46,15 +49,24 @@ def train(encoder, decoder_intra, decoder_inter, ff_mi,
         [torch.ones(pos_scores_intra.shape[0]), torch.zeros(neg_scores_intra.shape[0])]).cuda()  # .numpy()
     pos_scores_inter = torch.hstack(tuple(decoder_inter(train_pos_graph, emb_inter).values()))
     neg_scores_inter = torch.hstack(tuple(decoder_inter(train_neg_graph, emb_inter).values()))
+
     score_inter, score_intra = torch.cat([pos_scores_inter, neg_scores_inter]), torch.cat(
         [pos_scores_intra, neg_scores_intra])
     BCEloss = torch.mean(loss_fn['ERROR'](score_inter, labels))
     BCEloss += params.alpha_loss * torch.mean(loss_fn['ERROR'](score_intra, labels))
     KLloss = torch.mean(loss_fn['DIFF'](score_intra, score_inter))
-
-    curr_loss = BCEloss + params.beta_loss * KLloss + params.gamma_loss * dgi_loss
+    if epo_no < epo_num_with_fp:
+        emb_intra_in1, emb_intra_in2 = emb_intra[intra_pairs['in'][0]], emb_intra[intra_pairs['in'][1]]
+        emb_intra_bt2 = emb_intra[intra_pairs['bt'][1]]
+        diff_loss = loss_fn['FP_INTRA'](emb_intra_in1, emb_intra_in2, emb_intra_bt2)
+                    # + loss_fn['FP_INTRA'](prot_emb_intra_in1, prot_emb_intra_in2, prot_emb_intra_bt2)
+        print("back:", BCEloss.item(), KLloss.item(), dgi_loss.item(), diff_loss.item())
+        curr_loss = BCEloss + params.beta_loss * KLloss + params.gamma_loss * dgi_loss + params.theta_loss * diff_loss
+    else:
+        print("back:", BCEloss.item(), KLloss.item(), dgi_loss.item())
+        curr_loss = BCEloss + params.beta_loss * KLloss + params.gamma_loss * dgi_loss
     curr_loss.backward()
-    print("back:", BCEloss.item(), KLloss.item(), dgi_loss.item())
+
     opt.step()
     print('Train epoch: {} Loss: {:.6f}'.format(epoch, curr_loss.item()))
     with open(f'results/{loss_save_file}', 'a+') as f:
@@ -83,6 +95,59 @@ def predicting(model_intra, model_inter,
     labels = torch.cat([torch.ones(pos_score1.shape[0]), torch.zeros(neg_score1.shape[0])]).numpy()
     return labels, torch.cat([pos_score1, neg_score1]).detach().cpu().numpy(), \
            torch.cat([pos_score2, neg_score2]).detach().cpu().numpy()
+
+
+def save_id_mapping(dataset, split,
+                    id2drug, drug2id,
+                    id2target, target2id,
+                    id2relation):
+    np.save(f'data/{dataset}/{split}_id2drug.npy', id2drug)
+    np.save(f'data/{dataset}/{split}_drug2id.npy', drug2id)
+    np.save(f'data/{dataset}/{split}_id2target.npy', id2target)
+    np.save(f'data/{dataset}/{split}_target2id.npy', target2id)
+    np.save(f'data/{dataset}/{split}_id2relation.npy', id2relation)
+
+
+def load_fp_contrastive_pairs(dataset, split):
+    drug2id = np.load(f'data/{dataset}/{split}_drug2id.npy', allow_pickle=True).item()
+    target2id = np.load(f'data/{dataset}/{split}_target2id.npy', allow_pickle=True).item()
+
+    df = pd.read_csv(f'data/{dataset}/in_pairs.csv', names=['mol1', 'mol2'])
+    df['mol1'] = df['mol1'].map(drug2id)
+    df['mol2'] = df['mol2'].map(drug2id)
+    df.dropna(inplace=True)
+    # assert df.dropna().shape == df.shape
+    pos_mols1, pos_mols2 = df['mol1'].tolist(), df['mol2'].tolist()
+
+    df = pd.read_csv(f'data/{dataset}/bt_pairs.csv', names=['mol1', 'mol2'])
+    df['mol1'] = df['mol1'].map(drug2id)
+    df['mol2'] = df['mol2'].map(drug2id)
+    df.dropna(inplace=True)
+    neg_mols1, neg_mols2 = df['mol1'].tolist(), df['mol2'].tolist()
+
+    # emb_intra = concat target + bio    emb_inter = small + bio
+    if dataset == 'full':
+        for drug in drug2id.keys():
+            if drug.startswith('DB'):
+                target2id[drug] = drug2id[drug] + (target_cnt - small_cnt)
+
+    prot_df = pd.read_csv(f'data/{dataset}/in_pairs_prot.csv', names=['mol1', 'mol2'])
+    prot_df['mol1'] = prot_df['mol1'].map(target2id)
+    prot_df['mol2'] = prot_df['mol2'].map(target2id)
+    prot_df.dropna(inplace=True)
+    pos_prots1, pos_prots2 = prot_df['mol1'].tolist(), prot_df['mol2'].tolist()
+
+    prot_df = pd.read_csv(f'data/{dataset}/bt_pairs_prot.csv', names=['mol1', 'mol2'])
+    prot_df['mol1'] = prot_df['mol1'].map(target2id)
+    prot_df['mol2'] = prot_df['mol2'].map(target2id)
+    prot_df.dropna(inplace=True)
+    neg_prots1, neg_prots2 = prot_df['mol1'].tolist(), prot_df['mol2'].tolist()
+    return {
+        'in': [pos_mols1, pos_mols2],
+        'bt': [neg_mols1, neg_mols2],
+        'in_prot': [pos_prots1, pos_prots2],
+        'bt_prot': [neg_prots1, neg_prots2]
+    }
 
 
 if __name__ == '__main__':
@@ -208,12 +273,16 @@ if __name__ == '__main__':
             id2relation=id2relation
         ).to(params.device)
         cnt_trival = 0
+        intra_pairs = load_fp_contrastive_pairs(params.dataset, params.split)
         for epoch in range(1, params.max_epoch + 1):
-            emb_intra, emb_inter = train(encoder, decoder_intra, decoder_inter, ff_contra_net,
+            emb_intra, emb_inter = train(encoder, decoder_intra, decoder_inter, dgi_model,
                                          opt, loss_fn,
                                          mol_graphs,
                                          train_pos_graph, train_neg_graph,
-                                         f'loss_{result_file_name}')
+                                         f'09_loss_{result_file_name}',
+                                         epoch,
+                                         intra_pairs,
+                                         epo_num_with_fp=20)
             print('predicting for valid data')
 
             val_G, val_P1, val_P2 = predicting(decoder_intra, decoder_inter,
