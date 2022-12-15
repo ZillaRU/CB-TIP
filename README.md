@@ -27,4 +27,4 @@ options for DATASET_NAME: C-DB, CB-DB
 Negative samples: You can use the negative samples in data/DATASET_NAME/ddi_neg.csv, or generate negative samples using the code `utils/sample_neg_split.py`.
 SPLIT: You can split the positive/ negative samples into training/ validation/ test sets using the code `utils/sample_neg_split.py`. Please remember to update the data path in the function `dd_dt_tt_build_inter_graph_from_links` in `utils/hete_data_utils.py`.
 
-For more customized settings, please refer to `utils/arg_parser.py` and Section 7 in our paper.
+For more customized settings, please refer to `utils/arg_parser.py`.
