@@ -18,6 +18,10 @@ We share the archives of LMDB files storing the built intra-view graphs (path: `
 2. Organize your data as the form like `data/CB-DB/`.
 3. Construct intra-view graphs and save them into LMDB files with the code `utils/generate_intra_graph_db.py`.
 
+### Intra-view sample pair generation
+1. Run `data/calc_fp.py` to generate fingerprints for chemical drugs and divide them into clusters.
+2. Run `data/construct_pp_nn.py` to similar pairs and dissimilar pairs of chemical drugs.
+
 ### Start training
 To run the training process under default settings, use the following command:
 ```
