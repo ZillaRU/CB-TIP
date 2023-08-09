@@ -1,7 +1,7 @@
 # CB-TIP — *T*ype-aware *I*nteraction *P*rediction for both *C*hemical and *B*iotech drugs
 
 ## Overview
-CB-TIP is a graph-based multi-relational link prediction framework tailored for DDI prediction, which is useful for providing prescript tips to clinicians. See our paper(link: ) for details on the framework.
+CB-TIP is a graph-based multi-relational link prediction framework tailored for DDI prediction, which is useful for providing prescript tips to clinicians. See [our paper](https://academic.oup.com/bib/advance-article-abstract/doi/10.1093/bib/bbad271/7233058) for details on the framework.
 
 ## Running the code 
 
@@ -32,3 +32,18 @@ Negative samples: You can use the negative samples in data/DATASET_NAME/ddi_neg.
 SPLIT: You can split the positive/ negative samples into training/ validation/ test sets using the code `utils/sample_neg_split.py`. Please remember to update the data path in the function `dd_dt_tt_build_inter_graph_from_links` in `utils/hete_data_utils.py`.
 
 For more customized settings, please refer to `utils/arg_parser.py`.
+
+### BibTex of our CB-TIP
+If you use CB-TIP in your research, please use the following BibTeX entry. 📣 Thank you!
+```bibtex
+@article{10.1093/bib/bbad271,
+    author = {Ru, Zhongying and Wu, Yangyang and Shao, Jinning and Yin, Jianwei and Qian, Linghui and Miao, Xiaoye},
+    title = "{A dual-modal graph learning framework for identifying interaction events among chemical and biotech drugs}",
+    journal = {Briefings in Bioinformatics},
+    pages = {bbad271},
+    year = {2023},
+    month = {07},
+    issn = {1477-4054},
+    doi = {10.1093/bib/bbad271}
+}
+```
